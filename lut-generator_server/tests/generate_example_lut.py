@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""
+生成示例 LUT 文件和测试报告
+"""
+
+import sys
+import numpy as np
+from pathlib import Path
+from datetime import datetime
+
+# 添加 src 目录到路径
+sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+
+from lut3d_generator import LUT3DGenerator, LUT3DConfig, generate_lut_3d
+from cube_exporter_main import CUBEExporter, CUBEExportConfig, export_to_cube
+from color_analyzer import ColorStatistics
+from lut3d_generator import LUT3DMetadata
+
+
+def generate_example_luts():
+    """生成示例 LUT 文件"""
+    
+    print("=" * 60)
+    print("LUT Generator - Example LUT Generation")
+    print("=" * 60)
+    
+    # 创建示例统计信息（模拟电影风格色彩迁移）
+    # 源图像：温暖、高饱和度的电影风格
+    source_stats = ColorStatistics(
+        mean_L=55.0, mean_a=15.0, mean_b=25.0,
+        std_L=22.0, std_a=18.0, std_b=20.0,
+        var_L=484.0, var_a=324.0, var_b=400.0
+    )
+    
+    # 目标图像：标准 sRGB 图像
+    target_stats = ColorStatistics(
+        mean_L=50.0, mean_a=0.0, mean_b=10.0,
+        std_L=20.0, std_a=15.0, std_b=18.0,
+        var_L=400.0, var_a=225.0, var_b=324.0
+    )
+    
+    # 输出目录
+    output_dir = Path(__file__).parent.parent / 'examples' / 'generated_luts'
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    results = []
+    
+    # 生成不同精度的 LUT
+    for grid_size in [17, 33, 65]:
+        print(f"\nGenerating {grid_size}³ LUT...")
+        start_time = datetime.now()
+        
+        # 生成 LUT
+        lut = generate_lut_3d(
+            source_stats, target_stats,
+            grid_size=grid_size,
+            strength=1.0,
+            use_vectorized=True
+        )
+        
+        end_time = datetime.now()
+        generation_time = (end_time - start_time).total_seconds()
+        
+        # 导出为 CUBE 文件
+        output_path = output_dir / f"film_look_{grid_size}x{grid_size}x{grid_size}.cube"
+        
+        metadata = LUT3DMetadata(
+            created_at=datetime.now().isoformat(),
+            description=f"Film look LUT: warm, high saturation → standard sRGB ({grid_size}³ grid)",
+            source_stats=source_stats,
+            target_stats=target_stats,
+            config=LUT3DConfig(grid_size=grid_size)
+        )
+        
+        export_to_cube(
+            lut, output_path, metadata,
+            precision=6,
+            include_metadata=True
+        )
+        
+        file_size = output_path.stat().st_size
+        
+        result = {
+            'grid_size': grid_size,
+            'lut_shape': lut.shape,
+            'generation_time': generation_time,
+            'output_path': str(output_path),
+            'file_size': file_size,
+            'value_range': (float(lut.min()), float(lut.max()))
+        }
+        results.append(result)
+        
+        print(f"  Shape: {lut.shape}")
+        print(f"  Generation time: {generation_time:.3f}s")
+        print(f"  File size: {file_size / 1024:.2f} KB")
+        print(f"  Value range: [{lut.min():.4f}, {lut.max():.4f}]")
+        print(f"  Saved to: {output_path}")
+    
+    # 生成测试报告
+    report_path = output_dir / 'GENERATION_REPORT.md'
+    generate_report(results, report_path)
+    
+    print(f"\n✓ Generation complete!")
+    print(f"  Report saved to: {report_path}")
+    
+    return results
+
+
+def generate_report(results, output_path):
+    """生成测试报告"""
+    
+    report = """# LUT Generation Report
+
+Generated: {timestamp}
+
+## Summary
+
+Successfully generated {count} 3D LUT files in CUBE format.
+
+## Results
+
+| Grid Size | Shape | Generation Time | File Size | Value Range |
+|-----------|-------|-----------------|-----------|-------------|
+""".format(
+        timestamp=datetime.now().isoformat(),
+        count=len(results)
+    )
+    
+    for r in results:
+        report += f"| {r['grid_size']}³ | {r['lut_shape']} | {r['generation_time']:.3f}s | {r['file_size']/1024:.2f} KB | [{r['value_range'][0]:.4f}, {r['value_range'][1]:.4f}] |\n"
+    
+    report += """
+
+## Technical Details
+
+### LUT Specifications
+- **Format**: CUBE (compatible with DaVinci Resolve, Premiere Pro, Final Cut Pro)
+- **Color Space**: sRGB → sRGB
+- **Algorithm**: Reinhard color transfer
+- **Interpolation**: Trilinear
+
+### Performance Notes
+- Vectorized numpy implementation for optimal performance
+- Generation time scales with O(n³) where n is grid size
+- 65³ LUT recommended for highest quality grading
+- 17³ LUT suitable for real-time applications
+
+### Usage Example
+
+```python
+from lut3d_generator import LUT3DGenerator, LUT3DConfig
+from cube_exporter_main import export_to_cube
+
+# Create generator
+config = LUT3DConfig(grid_size=33)
+generator = LUT3DGenerator(config)
+
+# Generate LUT from statistics
+lut = generator.generate_from_stats(source_stats, target_stats, strength=1.0)
+
+# Export to CUBE
+export_to_cube(lut, 'output.cube', metadata)
+```
+
+## Files Generated
+
+"""
+    
+    for r in results:
+        report += f"- `{Path(r['output_path']).name}` - {r['grid_size']}³ film look LUT\n"
+    
+    report += """
+---
+*Report generated by LUT Generator Test Suite*
+"""
+    
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(report)
+
+
+if __name__ == "__main__":
+    generate_example_luts()
