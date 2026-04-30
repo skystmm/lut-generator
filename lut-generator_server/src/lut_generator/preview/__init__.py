@@ -4,10 +4,10 @@ LUT Generator Preview Module
 Preview rendering and comparison functionality.
 """
 
-from .renderer import PreviewRenderer
-from .comparator import Comparator
+from .generator import PreviewGenerator, ComparisonConfig, PreviewResult
 
 __all__ = [
-    "PreviewRenderer",
-    "Comparator",
+    "PreviewGenerator",
+    "ComparisonConfig",
+    "PreviewResult",
 ]

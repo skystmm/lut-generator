@@ -2,25 +2,21 @@
 """
 LUT Generator CLI - 命令行工具
 
-支持：
-- 单图分析模式
-- 批量分析模式
-- 多图融合模式
-- LUT 生成模式
+DEPRECATED: This module is a compatibility shim.
+Please use `lut_generator.cli.main` instead.
 
-用法：
-    # 单图分析
-    python cli.py analyze <image_path>
-    
-    # 批量分析目录
-    python cli.py batch <directory> [-r] [-o output.json]
-    
-    # 多图融合
-    python cli.py fuse <directory> [-w weights] [-s strategy] [-o output.json]
-    
-    # 生成 LUT
-    python cli.py generate <source_dir> <target_dir> [-o output.cube]
+Supports:
+- Single image analysis
+- Batch analysis
+- Multi-image fusion
+- LUT generation
 """
+import warnings
+warnings.warn(
+    "Importing from 'cli' is deprecated. Use 'lut_generator.cli.main' instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 import argparse
 import sys
@@ -29,13 +25,16 @@ from pathlib import Path
 from typing import List, Optional
 import logging
 
-# 导入模块
-from color_analyzer import ColorAnalyzer, analyze_image
-from batch_analyzer import BatchAnalyzer, analyze_directory_batch
-from feature_fusion import FeatureFusion, FusionConfig, fuse_features, create_weight_config
-from lut3d_generator import LUT3DGenerator
+# Import from package
+from lut_generator.analysis.analyzer import ColorAnalyzer, analyze_image
+from lut_generator.analysis.batch_analyzer import BatchAnalyzer, analyze_directory_batch
+from lut_generator.analysis.feature_fusion import FeatureFusion, FusionConfig, fuse_features, create_weight_config
+from lut_generator.lut.lut3d import LUT3DGenerator, LUT3DConfig
 
-# 配置日志
+# Re-export the main function from package
+from lut_generator.cli.main import main, cli
+
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -46,12 +45,13 @@ logger = logging.getLogger(__name__)
 def cmd_analyze(args):
     """单图分析命令"""
     image_path = Path(args.image)
+    output_fh = None
     
     if not image_path.exists():
         print(f"Error: Image not found: {image_path}")
         sys.exit(1)
     
-    print(f"Analyzing: {image_path}")
+    logger.info(f"Analyzing: {image_path}")
     
     try:
         result = analyze_image(image_path, use_colour=not args.fast)
@@ -69,21 +69,31 @@ def cmd_analyze(args):
         print(f"  Color entropy: {result.distribution.color_entropy:.2f}")
         print(f"  Dominant color (L,a,b): [{result.distribution.dominant_color[0]:.2f}, {result.distribution.dominant_color[1]:.2f}, {result.distribution.dominant_color[2]:.2f}]")
         
-        # 保存结果
         if args.output:
             output_path = Path(args.output)
-            with open(output_path, 'w', encoding='utf-8') as f:
-                json.dump(result.to_dict(), f, indent=2)
-            print(f"\nResults saved to: {output_path}")
+            output_fh = open(output_path, 'w', encoding='utf-8')
+            try:
+                json.dump(result.to_dict(), output_fh, indent=2)
+                print(f"\nResults saved to: {output_path}")
+            finally:
+                output_fh.close()
+                output_fh = None
         
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         sys.exit(1)
+    finally:
+        if output_fh is not None:
+            try:
+                output_fh.close()
+            except Exception:
+                pass
 
 
 def cmd_batch(args):
     """批量分析命令"""
     directory = Path(args.directory)
+    output_fh = None
     
     if not directory.exists():
         print(f"Error: Directory not found: {directory}")
@@ -93,10 +103,11 @@ def cmd_batch(args):
         print(f"Error: Not a directory: {directory}")
         sys.exit(1)
     
-    print(f"Scanning directory: {directory}")
-    print(f"Recursive: {args.recursive}")
-    print(f"Parallel: {not args.serial}")
+    logger.info(f"Scanning directory: {directory}")
+    logger.info(f"Recursive: {args.recursive}")
+    logger.info(f"Parallel: {not args.serial}")
     
+    analyzer = None
     try:
         analyzer = BatchAnalyzer(
             use_colour=not args.fast,
@@ -126,13 +137,11 @@ def cmd_batch(args):
                 if not img.valid:
                     print(f"  ✗ {img.path.name}: {img.error_message}")
         
-        # 保存结果
         if args.output:
             output_path = Path(args.output)
             analyzer.save_results(result, output_path, format=args.format)
             print(f"\nResults saved to: {output_path}")
         
-        # 计算聚合统计
         if result.valid_images > 0:
             valid_results = result.get_valid_results()
             aggregated = analyzer.aggregate_statistics(valid_results)
@@ -143,42 +152,41 @@ def cmd_batch(args):
             print(f"Avg color entropy: {aggregated['avg_color_entropy']:.2f}")
         
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
+    finally:
+        analyzer = None
+        if output_fh is not None:
+            try:
+                output_fh.close()
+            except Exception:
+                pass
 
 
 def parse_weights(weight_str: str, num_images: int) -> Optional[List[float]]:
-    """
-    解析权重的字符串
-    
-    Args:
-        weight_str: 权重字符串，如 "2,1,1" 或 "auto"
-        num_images: 图片数量
-        
-    Returns:
-        权重列表或 None（等权重）
-    """
+    """解析权重的字符串"""
     if weight_str == 'auto' or weight_str is None:
         return None
     
     try:
         weights = [float(w.strip()) for w in weight_str.split(',')]
         if len(weights) != num_images:
-            print(f"Warning: weights count ({len(weights)}) doesn't match images count ({num_images})")
-            print("Using equal weights instead")
+            logger.warning(f"weights count ({len(weights)}) doesn't match images count ({num_images})")
+            logger.warning("Using equal weights instead")
             return None
         return weights
     except ValueError:
-        print(f"Warning: Invalid weights format: {weight_str}")
-        print("Using equal weights instead")
+        logger.warning(f"Invalid weights format: {weight_str}")
+        logger.warning("Using equal weights instead")
         return None
 
 
 def cmd_fuse(args):
     """多图融合命令"""
     directory = Path(args.directory)
+    output_fh = None
     
     if not directory.exists():
         print(f"Error: Directory not found: {directory}")
@@ -188,10 +196,10 @@ def cmd_fuse(args):
         print(f"Error: Not a directory: {directory}")
         sys.exit(1)
     
-    print(f"Loading images from: {directory}")
+    logger.info(f"Loading images from: {directory}")
     
+    analyzer = None
     try:
-        # 批量分析
         analyzer = BatchAnalyzer(use_colour=not args.fast)
         batch_result = analyzer.analyze_directory(directory, recursive=args.recursive)
         
@@ -202,12 +210,10 @@ def cmd_fuse(args):
         results = batch_result.get_valid_results()
         valid_paths = batch_result.get_valid_paths()
         
-        print(f"Loaded {len(results)} valid images")
+        logger.info(f"Loaded {len(results)} valid images")
         
-        # 解析权重
         weights = parse_weights(args.weights, len(results))
         
-        # 创建配置
         config = FusionConfig(
             strategy=args.strategy,
             weights=weights or [],
@@ -215,7 +221,6 @@ def cmd_fuse(args):
             distribution_method='average'
         )
         
-        # 融合
         fusion = FeatureFusion(config)
         fused = fusion.fuse(results, weights)
         
@@ -230,30 +235,40 @@ def cmd_fuse(args):
         print(f"  Color entropy: {fused.distribution.color_entropy:.2f}")
         print(f"  Dominant color (L,a,b): [{fused.distribution.dominant_color[0]:.2f}, {fused.distribution.dominant_color[1]:.2f}, {fused.distribution.dominant_color[2]:.2f}]")
         
-        # 保存结果
         if args.output:
             output_path = Path(args.output)
-            with open(output_path, 'w', encoding='utf-8') as f:
-                json.dump(fused.to_dict(), f, indent=2)
-            print(f"\nFusion result saved to: {output_path}")
+            output_fh = open(output_path, 'w', encoding='utf-8')
+            try:
+                json.dump(fused.to_dict(), output_fh, indent=2)
+                print(f"\nFusion result saved to: {output_path}")
+            finally:
+                output_fh.close()
+                output_fh = None
         
-        # 保存配置
         if args.save_config:
             config_path = Path(args.save_config)
             config.save(config_path)
             print(f"Fusion config saved to: {config_path}")
         
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
+    finally:
+        analyzer = None
+        if output_fh is not None:
+            try:
+                output_fh.close()
+            except Exception:
+                pass
 
 
 def cmd_generate(args):
     """生成 LUT 命令"""
     source_dir = Path(args.source)
     target_dir = Path(args.target)
+    output_fh = None
     
     if not source_dir.exists():
         print(f"Error: Source directory not found: {source_dir}")
@@ -263,13 +278,14 @@ def cmd_generate(args):
         print(f"Error: Target directory not found: {target_dir}")
         sys.exit(1)
     
-    print(f"Source directory: {source_dir}")
-    print(f"Target directory: {target_dir}")
-    print(f"LUT size: {args.size}")
+    logger.info(f"Source directory: {source_dir}")
+    logger.info(f"Target directory: {target_dir}")
+    logger.info(f"LUT size: {args.size}")
     
+    source_analyzer = None
+    target_analyzer = None
     try:
-        # 分析源目录
-        print("\nAnalyzing source images...")
+        logger.info("Analyzing source images...")
         source_analyzer = BatchAnalyzer(use_colour=not args.fast)
         source_result = source_analyzer.analyze_directory(source_dir, recursive=args.recursive)
         
@@ -279,10 +295,9 @@ def cmd_generate(args):
         
         source_results = source_result.get_valid_results()
         source_stats = source_analyzer.aggregate_statistics(source_results)
-        print(f"Source: {len(source_results)} images analyzed")
+        logger.info(f"Source: {len(source_results)} images analyzed")
         
-        # 分析目标目录
-        print("Analyzing target images...")
+        logger.info("Analyzing target images...")
         target_analyzer = BatchAnalyzer(use_colour=not args.fast)
         target_result = target_analyzer.analyze_directory(target_dir, recursive=args.recursive)
         
@@ -292,45 +307,71 @@ def cmd_generate(args):
         
         target_results = target_result.get_valid_results()
         target_stats = target_analyzer.aggregate_statistics(target_results)
-        print(f"Target: {len(target_results)} images analyzed")
+        logger.info(f"Target: {len(target_results)} images analyzed")
         
-        # 生成 LUT
-        print(f"\nGenerating {args.size}x{args.size}x{args.size} LUT...")
-        generator = LUT3DGenerator(size=args.size)
+        logger.info(f"Generating {args.size}x{args.size}x{args.size} LUT...")
+        config = LUT3DConfig(grid_size=args.size)
+        generator = LUT3DGenerator(config=config)
         
-        # 使用聚合统计作为源和目标色彩特征
-        source_mean = source_stats['mean']
-        target_mean = target_stats['mean']
-        
-        # 生成色彩转换 LUT
-        lut = generator.generate_style_transfer_lut(
-            source_mean=source_mean,
-            target_mean=target_mean
+        from lut_generator.core.reinhard import ColorStatistics
+        source_stats_obj = ColorStatistics(
+            mean_L=source_stats['mean'][0],
+            mean_a=source_stats['mean'][1],
+            mean_b=source_stats['mean'][2],
+            std_L=source_stats['std'][0],
+            std_a=source_stats['std'][1],
+            std_b=source_stats['std'][2],
+            var_L=source_stats['var'][0],
+            var_a=source_stats['var'][1],
+            var_b=source_stats['var'][2]
+        )
+        target_stats_obj = ColorStatistics(
+            mean_L=target_stats['mean'][0],
+            mean_a=target_stats['mean'][1],
+            mean_b=target_stats['mean'][2],
+            std_L=target_stats['std'][0],
+            std_a=target_stats['std'][1],
+            std_b=target_stats['std'][2],
+            var_L=target_stats['var'][0],
+            var_a=target_stats['var'][1],
+            var_b=target_stats['var'][2]
         )
         
-        # 导出
+        lut = generator.generate_from_stats(
+            source_stats=source_stats_obj,
+            target_stats=target_stats_obj
+        )
+        
         if args.output:
             output_path = Path(args.output)
         else:
             output_path = Path.cwd() / 'output.cube'
         
-        from cube_exporter_main import CUBEExporter
-        exporter = CUBEExporter()
-        exporter.export(lut, str(output_path))
+        from lut_generator.lut.exporter import LUTExporter
+        exporter = LUTExporter(lut)
+        exporter.export_cube(str(output_path))
         
         print(f"\nLUT generated successfully!")
         print(f"Output: {output_path}")
         print(f"Size: {args.size}x{args.size}x{args.size}")
         
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
+    finally:
+        source_analyzer = None
+        target_analyzer = None
+        if output_fh is not None:
+            try:
+                output_fh.close()
+            except Exception:
+                pass
 
 
-def main():
-    """主函数"""
+def main_legacy():
+    """Legacy main function (for backward compatibility)"""
     parser = argparse.ArgumentParser(
         description='LUT Generator CLI - 图片风格分析与 LUT 生成工具',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -358,13 +399,11 @@ Examples:
     
     subparsers = parser.add_subparsers(dest='command', help='Commands')
     
-    # analyze 命令
     analyze_parser = subparsers.add_parser('analyze', help='Analyze single image')
     analyze_parser.add_argument('image', help='Image path')
     analyze_parser.add_argument('-o', '--output', help='Output JSON file')
     analyze_parser.set_defaults(func=cmd_analyze)
     
-    # batch 命令
     batch_parser = subparsers.add_parser('batch', help='Batch analyze directory')
     batch_parser.add_argument('directory', help='Directory path')
     batch_parser.add_argument('-r', '--recursive', action='store_true', help='Recursive scan')
@@ -374,7 +413,6 @@ Examples:
     batch_parser.add_argument('-s', '--serial', action='store_true', help='Serial processing')
     batch_parser.set_defaults(func=cmd_batch)
     
-    # fuse 命令
     fuse_parser = subparsers.add_parser('fuse', help='Fuse multiple images')
     fuse_parser.add_argument('directory', help='Directory path')
     fuse_parser.add_argument('-w', '--weights', help='Weights (comma-separated, e.g., "2,1,1")')
@@ -385,7 +423,6 @@ Examples:
     fuse_parser.add_argument('-r', '--recursive', action='store_true', help='Recursive scan')
     fuse_parser.set_defaults(func=cmd_fuse)
     
-    # generate 命令
     generate_parser = subparsers.add_parser('generate', help='Generate LUT')
     generate_parser.add_argument('source', help='Source directory')
     generate_parser.add_argument('target', help='Target directory')
@@ -407,4 +444,4 @@ Examples:
 
 
 if __name__ == '__main__':
-    main()
+    main_legacy()

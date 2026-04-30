@@ -1,18 +1,36 @@
 """
 LUT Generator Utils Module
 
-Utility functions for I/O, configuration, and validation.
+Utility functions for I/O, configuration, validation, reporting, and optimization.
 """
 
-from .io import load_image, save_image
-from .config import load_config, save_config
-from .validators import validate_image_path, validate_lut_size
+from .html_report import HTMLReportGenerator, ReportConfig, ReportData, ReportResult
+from .optimizer import (
+    PerformanceOptimizer,
+    LUTCache,
+    ChunkedImageProcessor,
+    ParallelProcessor,
+    CacheConfig,
+    ParallelConfig,
+    MemoryConfig,
+    OptimizerStats,
+)
+from .visualizer import ColorVisualizer, VisualizationConfig, VisualizationResult
 
 __all__ = [
-    "load_image",
-    "save_image",
-    "load_config",
-    "save_config",
-    "validate_image_path",
-    "validate_lut_size",
+    "HTMLReportGenerator",
+    "ReportConfig",
+    "ReportData",
+    "ReportResult",
+    "PerformanceOptimizer",
+    "LUTCache",
+    "ChunkedImageProcessor",
+    "ParallelProcessor",
+    "CacheConfig",
+    "ParallelConfig",
+    "MemoryConfig",
+    "OptimizerStats",
+    "ColorVisualizer",
+    "VisualizationConfig",
+    "VisualizationResult",
 ]

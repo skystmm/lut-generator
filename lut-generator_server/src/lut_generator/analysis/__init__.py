@@ -1,13 +1,26 @@
 """
 LUT Generator Analysis Module
 
-Image analysis and batch processing functionality.
+Image analysis and color statistics functionality.
 """
 
-from .feature_extractor import FeatureExtractor
-from .batch_processor import BatchProcessor
+from .analyzer import ColorAnalyzer, AnalysisResult, ColorHistogram, ColorDistribution, analyze_image
+from .batch_analyzer import BatchAnalyzer, BatchAnalysisResult, ImageInfo, analyze_directory_batch
+from .feature_fusion import FeatureFusion, FusionConfig, FusedFeatures, fuse_features, create_weight_config
 
 __all__ = [
-    "FeatureExtractor",
-    "BatchProcessor",
+    "ColorAnalyzer",
+    "AnalysisResult",
+    "ColorHistogram",
+    "ColorDistribution",
+    "analyze_image",
+    "BatchAnalyzer",
+    "BatchAnalysisResult",
+    "ImageInfo",
+    "analyze_directory_batch",
+    "FeatureFusion",
+    "FusionConfig",
+    "FusedFeatures",
+    "fuse_features",
+    "create_weight_config",
 ]

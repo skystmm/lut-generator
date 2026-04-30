@@ -7,7 +7,7 @@ name = "lut-generator"
 version = "0.1.0"
 description = "Image analysis based 3D LUT generator using Reinhard color transfer algorithm"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "RD Agent", email = "rd@example.com"}
@@ -17,6 +17,7 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Multimedia :: Graphics",
@@ -27,9 +28,6 @@ dependencies = [
     "colour-science>=0.4.0",
     "opencv-python>=4.8.0",
     "numpy>=1.24.0",
-    "scipy>=1.10.0",
-    "click>=8.1.0",
-    "pyyaml>=6.0",
     "pillow>=10.0.0",
 ]
 
@@ -49,7 +47,7 @@ lut-generator = "lut_generator.cli.main:cli"
 where = ["src"]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py310"
 line-length = 88
 select = [
     "E",   # pycodestyle errors
@@ -73,10 +71,10 @@ known-first-party = ["lut_generator"]
 
 [tool.black]
 line-length = 88
-target-version = ["py311", "py312"]
+target-version = ["py310", "py311", "py312"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false

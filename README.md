@@ -30,7 +30,9 @@ LUT Generator 是一款专业的色彩工具，能够从参考图片自动分析
 
 | 功能 | 说明 |
 |------|------|
-| 🖼️ 单图分析 | 从单张参考图片生成 LUT |
+| 🖼️ 单图风格提取 | 从单张调色后图片提取风格特征，生成模拟该风格的 LUT |
+| 🎨 暖冷色调检测 | 自动识别图像的暖/冷色调倾向 |
+| 🌓 亮度/对比度分析 | 检测图像的高调/低调特征和对比度 |
 | 📚 批量分析 | 扫描整个目录，分析多张图片 |
 | 🎨 多图融合 | 加权平均/中值融合多张图片的风格 |
 | 🎯 精度可选 | 17³ / 33³ / 65³ 三种精度 |
@@ -93,7 +95,37 @@ lut-generator analyze \
   --preview
 ```
 
-#### 2️⃣ 应用 LUT 到图片
+#### 2️⃣ 单图风格提取（新功能 🎉）
+
+从一张调色后的图片提取风格特征，生成可复用的 LUT：
+
+```bash
+# 基础用法
+lut-generator extract \
+  --input graded_photo.jpg \
+  --output extracted_style.cube
+
+# 带强度调节
+lut-generator extract \
+  --input graded_photo.jpg \
+  --output extracted_style.cube \
+  --strength 0.7 \
+  --size 33
+
+# 生成分析报告
+lut-generator extract \
+  --input graded_photo.jpg \
+  --output extracted_style.cube \
+  --report analysis.json
+```
+
+**提取的风格特征**：
+- 🎨 色调偏移（暖色/冷色倾向）
+- 🌓 亮度特征（高调/低调）
+- 📊 对比度比例
+- 💫 饱和度变化
+
+#### 3️⃣ 应用 LUT 到图片
 
 ```bash
 # 单张
@@ -129,6 +161,8 @@ lut-generator report \
 ---
 
 ## 📖 Python API
+
+### 基础用法
 
 ```python
 from lut3d_generator import LUT3DGenerator, LUT3DConfig
@@ -174,6 +208,60 @@ report.generate_from_paths(
     output='photo_styled.jpg',
     output_html='report.html'
 )
+```
+
+### 单图风格提取 API
+
+```python
+from lut_generator.core.style_extractor import StyleExtractor
+import numpy as np
+
+# 1. 创建风格提取器
+extractor = StyleExtractor(
+    grid_size=33,     # LUT 精度：17, 33, 或 65
+    strength=0.8      # 风格强度：0.0-1.0
+)
+
+# 2. 从文件提取风格
+result = extractor.generate_lut(
+    image_path='./graded_photo.jpg',
+    strength=0.7       # 可选：覆盖默认强度
+)
+
+# 3. 访问提取的风格特征
+features = result.features
+print(f"色调偏移 L: {features.tone_shift_L:.2f}")  # 亮度
+print(f"色调偏移 b: {features.tone_shift_b:.2f}")  # 暖冷
+print(f"Warmth: {features.warmth:.3f}")            # -1(冷) 到 1(暖)
+print(f"Saturation: {features.saturation:.3f}")
+print(f"Contrast: {features.contrast:.3f}")
+
+# 4. 从 numpy 数组提取（适用于批处理）
+import cv2
+rgb = cv2.imread('photo.jpg')[:, :, ::-1]  # BGR -> RGB
+features = extractor.extract_features_from_array(rgb)
+lut = extractor.generate_lut_from_features(features, strength=0.8)
+
+# 5. 导出 LUT
+from lut_generator.io.cube_writer import CubeWriter
+writer = CubeWriter()
+writer.write(result.style_lut_data, 'extracted_style.cube', title='My Style')
+
+# 6. 导出分析报告
+import json
+with open('analysis.json', 'w') as f:
+    json.dump({
+        'tone_shift': {
+            'L': features.tone_shift_L,
+            'a': features.tone_shift_a,
+            'b': features.tone_shift_b
+        },
+        'style_metrics': {
+            'warmth': features.warmth,
+            'saturation': features.saturation,
+            'contrast': features.contrast
+        }
+    }, f, indent=2)
 ```
 
 ---
