@@ -1,24 +1,26 @@
 # 🎨 LUT Generator
 
-**从图片分析自动生成 3D LUT (.cube) 的专业工具**
+**从图片和视频自动生成 3D LUT (.cube) 的专业调色工具**
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-205%20passed-green.svg)]()
-[![Code Style](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+![CI](https://github.com/skystmm/lut-generator/actions/workflows/ci.yml/badge.svg)
+[![Code Style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 
 ---
 
 ## 📖 简介
 
-LUT Generator 是一款专业的色彩工具，能够从参考图片自动分析色彩风格，并生成标准的 3D LUT (.cube 格式)。使用 Reinhard 色彩迁移算法，实现精确的色彩风格匹配。
+LUT Generator 是一款专业的色彩工具，能够从参考图片或视频自动分析色彩风格，生成标准 3D LUT (.cube 格式)。基于 Reinhard 色彩迁移算法，实现精确的色彩风格匹配与反向提取。
 
 **核心能力**：
-- 📸 **图片分析** - 从单张或多张参考图片提取色彩特征
-- 🎯 **色彩迁移** - 基于 Reinhard 算法实现专业级色彩匹配
-- 📦 **LUT 生成** - 输出 17³/33³/65³ 精度的标准 .cube 文件
-- 👁️ **效果预览** - 生成前后对比图、直方图、色域图和 HTML 报告
-- ⚡ **高性能** - 缓存加速 2-20x，并行处理 3-6x
+- 📸 **图片风格提取** — 从单张或多张参考图片提取色彩特征
+- 🎬 **视频 LUT 生成** — 支持从视频中提取风格，含场景检测与智能帧采样
+- 🎯 **色彩迁移** — 基于 Reinhard 算法实现专业级色彩匹配
+- 🔄 **风格反向解析** — 从已调色的图片/视频中还原 LUT
+- 📦 **标准格式** — 输出 17³/33³/65³ 精度的 .cube 文件
+- 👁️ **效果预览** — 前后对比图、直方图、色域图和交互式 HTML 报告
+- ⚡ **高性能** — LUT 缓存加速 2-20x，并行处理 3-6x
 
 **兼容软件**：DaVinci Resolve、Premiere Pro、Final Cut Pro、Photoshop、OBS 等所有支持 .cube 格式的专业软件。
 
@@ -26,7 +28,7 @@ LUT Generator 是一款专业的色彩工具，能够从参考图片自动分析
 
 ## ✨ 功能特性
 
-### 核心功能
+### 图片 LUT
 
 | 功能 | 说明 |
 |------|------|
@@ -35,19 +37,24 @@ LUT Generator 是一款专业的色彩工具，能够从参考图片自动分析
 | 🌓 亮度/对比度分析 | 检测图像的高调/低调特征和对比度 |
 | 📚 批量分析 | 扫描整个目录，分析多张图片 |
 | 🎨 多图融合 | 加权平均/中值融合多张图片的风格 |
-| 🎯 精度可选 | 17³ / 33³ / 65³ 三种精度 |
-| 📦 标准格式 | 输出 .cube 格式，兼容所有主流软件 |
 | 🎚️ 强度调节 | 0.0-1.0 可调的迁移强度 |
-| 👁️ 效果预览 | 并排/滑块/混合/差异 4 种对比模式 |
-| 📊 可视化 | RGB 直方图、Lab 色域图 |
-| 📄 HTML 报告 | 交互式报告，含滑块对比和统计信息 |
+
+### 视频 LUT 🎬
+
+| 功能 | 说明 |
+|------|------|
+| 🎬 视频风格生成 | 从视频提取色彩风格，生成 3D LUT |
+| 🎞️ 视频到视频风格迁移 | 将 A 视频的风格应用到 B 视频 |
+| 📸 视频到图片风格迁移 | 从视频提取风格，应用到图片 |
+| 🔍 场景检测 | 基于直方图的自动场景分割 |
+| 📊 智能帧采样 | 均匀/场景/自适应三种采样策略 |
 
 ### 性能优化
 
-- ✅ **LUT 缓存** - 避免重复加载，加速 2-20x
-- ✅ **并行处理** - 多核 CPU 利用，加速 3-6x
-- ✅ **内存优化** - 分块处理，支持 8K+ 图像
-- ✅ **向量化计算** - numpy 优化，比循环快 10-100x
+- ✅ **LUT 缓存** — 避免重复加载，加速 2-20x
+- ✅ **并行处理** — 多核 CPU 利用，加速 3-6x
+- ✅ **内存优化** — 分块处理，支持 8K+ 图像
+- ✅ **向量化计算** — numpy 优化，比循环快 10-100x
 
 ---
 
@@ -74,56 +81,37 @@ pip install -e .
 #### 1️⃣ 从图片生成 LUT
 
 ```bash
-# 单张图片
-lut-generator analyze \
+# 从单张图片提取风格
+lut-generator extract \
+  --input graded_photo.jpg \
+  --output style.cube \
+  --size 33
+
+# 带强度调节 + 预览
+lut-generator extract \
+  --input graded_photo.jpg \
+  --output style.cube \
+  --strength 0.7 \
+  --preview
+```
+
+#### 2️⃣ 色彩迁移生成 LUT
+
+```bash
+# 将参考图的色彩风格应用到目标图
+lut-generator generate \
   --input reference.jpg \
+  --target photo.jpg \
   --output style.cube \
   --size 33
 
 # 多张图片（批量）
-lut-generator analyze \
+lut-generator generate \
   --input ./references/ \
+  --target ./photos/ \
   --output style.cube \
-  --size 33 \
   --batch
-
-# 带权重融合
-lut-generator analyze \
-  --input ./references/ \
-  --output style.cube \
-  --weights "3,2,1" \
-  --preview
 ```
-
-#### 2️⃣ 单图风格提取（新功能 🎉）
-
-从一张调色后的图片提取风格特征，生成可复用的 LUT：
-
-```bash
-# 基础用法
-lut-generator extract \
-  --input graded_photo.jpg \
-  --output extracted_style.cube
-
-# 带强度调节
-lut-generator extract \
-  --input graded_photo.jpg \
-  --output extracted_style.cube \
-  --strength 0.7 \
-  --size 33
-
-# 生成分析报告
-lut-generator extract \
-  --input graded_photo.jpg \
-  --output extracted_style.cube \
-  --report analysis.json
-```
-
-**提取的风格特征**：
-- 🎨 色调偏移（暖色/冷色倾向）
-- 🌓 亮度特征（高调/低调）
-- 📊 对比度比例
-- 💫 饱和度变化
 
 #### 3️⃣ 应用 LUT 到图片
 
@@ -134,7 +122,7 @@ lut-generator apply \
   --lut style.cube \
   --output photo_styled.jpg
 
-# 批量
+# 批量 + 并行
 lut-generator apply \
   --input ./photos/ \
   --lut style.cube \
@@ -143,7 +131,50 @@ lut-generator apply \
   --parallel
 ```
 
-#### 3️⃣ 生成完整报告
+#### 4️⃣ 从视频生成 LUT 🎬
+
+```bash
+# 从单个视频提取风格
+lut-generator video-generate \
+  source_video.mp4 \
+  --output video_style.cube
+
+# 将视频 A 的风格应用到视频 B
+lut-generator video-generate \
+  style_source.mp4 \
+  --target target_video.mp4 \
+  --output graded_video.cube
+
+# 场景模式（自动检测场景分段）
+lut-generator video-generate \
+  movie.mp4 \
+  --sampling scene \
+  --output cinematic.cube
+
+# 自适应采样（根据画面变化自动调整）
+lut-generator video-generate \
+  vlog.mp4 \
+  --sampling adaptive \
+  --max-frames 50 \
+  --output vlog_style.cube
+```
+
+**视频采样策略**：
+- `uniform` — 均匀间隔采样（默认）
+- `scene` — 基于场景分割，每个场景采样代表性帧
+- `adaptive` — 根据画面变化程度自适应调整采样密度
+
+#### 5️⃣ 色彩分析
+
+```bash
+# 分析图片色彩统计
+lut-generator analyze photo.jpg
+
+# 输出到 JSON
+lut-generator analyze photo.jpg -o stats.json
+```
+
+#### 6️⃣ 生成完整报告
 
 ```bash
 lut-generator report \
@@ -153,10 +184,10 @@ lut-generator report \
 ```
 
 **输出**：
-- `report.html` - 交互式 HTML 报告（滑块对比）
-- `histogram.png` - RGB 直方图对比
-- `gamut.png` - Lab 色域图对比
-- `statistics.json` - 色彩统计数据
+- `report.html` — 交互式 HTML 报告（滑块对比）
+- `histogram.png` — RGB 直方图对比
+- `gamut.png` — Lab 色域图对比
+- `statistics.json` — 色彩统计数据
 
 ---
 
@@ -165,103 +196,60 @@ lut-generator report \
 ### 基础用法
 
 ```python
-from lut3d_generator import LUT3DGenerator, LUT3DConfig
-from lut_applier import LUTApplier
-from preview_generator import PreviewGenerator
-from html_report import HTMLReportGenerator
+from lut_generator.lut.lut3d import LUT3DGenerator, LUT3DConfig
+from lut_generator.lut.exporter import LUTExporter
 
-# 1. 配置 LUT 生成器
+# 配置 LUT 生成器
 config = LUT3DConfig(
     grid_size=33,        # 33³ 精度
     smoothness=0.5,      # 平滑度
     strength=0.8         # 迁移强度
 )
 
-# 2. 从参考图片生成 LUT
+# 生成并导出
 generator = LUT3DGenerator(config)
-result = generator.generate_from_images(
-    reference_path='./references/cyberpunk.jpg',
-    target_colorspace='sRGB'
-)
+lut_data = generator.generate(reference_image, target_image)
 
-# 3. 导出 LUT
-generator.export_to_cube('cyberpunk_lut.cube')
-
-# 4. 应用 LUT
-applier = LUTApplier(generator)
-applier.apply_to_file('photo.jpg', 'photo_styled.jpg')
-
-# 5. 生成预览对比
-preview = PreviewGenerator()
-preview.generate_comparison(
-    original='photo.jpg',
-    styled='photo_styled.jpg',
-    output='comparison.png',
-    mode='slider'  # 滑块对比
-)
-
-# 6. 生成 HTML 报告
-report = HTMLReportGenerator()
-report.generate_from_paths(
-    reference='cyberpunk.jpg',
-    input='photo.jpg',
-    output='photo_styled.jpg',
-    output_html='report.html'
-)
+exporter = LUTExporter()
+exporter.export(lut_data, 'output.cube', title='My Style')
 ```
 
-### 单图风格提取 API
+### 视频 LUT API 🎬
+
+```python
+from lut_generator.video.frame_extractor import VideoFrameExtractor, ExtractorConfig
+from lut_generator.video.analyzer import VideoColorAnalyzer
+
+# 1. 提取视频帧
+extractor = VideoFrameExtractor(
+    config=ExtractorConfig(
+        sampling='scene',     # 场景分割采样
+        max_frames=30
+    )
+)
+frames = extractor.extract('source_video.mp4')
+
+# 2. 分析视频色彩
+analyzer = VideoColorAnalyzer()
+video_stats = analyzer.analyze_frames(frames)
+
+# 3. 生成视频 LUT
+lut = analyzer.generate_lut(video_stats, grid_size=33)
+```
+
+### 风格提取 API
 
 ```python
 from lut_generator.core.style_extractor import StyleExtractor
-import numpy as np
 
-# 1. 创建风格提取器
-extractor = StyleExtractor(
-    grid_size=33,     # LUT 精度：17, 33, 或 65
-    strength=0.8      # 风格强度：0.0-1.0
-)
+extractor = StyleExtractor(grid_size=33, strength=0.8)
+result = extractor.generate_lut(image_path='./graded_photo.jpg')
 
-# 2. 从文件提取风格
-result = extractor.generate_lut(
-    image_path='./graded_photo.jpg',
-    strength=0.7       # 可选：覆盖默认强度
-)
-
-# 3. 访问提取的风格特征
+# 访问提取的风格特征
 features = result.features
-print(f"色调偏移 L: {features.tone_shift_L:.2f}")  # 亮度
-print(f"色调偏移 b: {features.tone_shift_b:.2f}")  # 暖冷
-print(f"Warmth: {features.warmth:.3f}")            # -1(冷) 到 1(暖)
+print(f"Warmth: {features.warmth:.3f}")        # -1(冷) 到 1(暖)
 print(f"Saturation: {features.saturation:.3f}")
 print(f"Contrast: {features.contrast:.3f}")
-
-# 4. 从 numpy 数组提取（适用于批处理）
-import cv2
-rgb = cv2.imread('photo.jpg')[:, :, ::-1]  # BGR -> RGB
-features = extractor.extract_features_from_array(rgb)
-lut = extractor.generate_lut_from_features(features, strength=0.8)
-
-# 5. 导出 LUT
-from lut_generator.io.cube_writer import CubeWriter
-writer = CubeWriter()
-writer.write(result.style_lut_data, 'extracted_style.cube', title='My Style')
-
-# 6. 导出分析报告
-import json
-with open('analysis.json', 'w') as f:
-    json.dump({
-        'tone_shift': {
-            'L': features.tone_shift_L,
-            'a': features.tone_shift_a,
-            'b': features.tone_shift_b
-        },
-        'style_metrics': {
-            'warmth': features.warmth,
-            'saturation': features.saturation,
-            'contrast': features.contrast
-        }
-    }, f, indent=2)
 ```
 
 ---
@@ -272,13 +260,13 @@ with open('analysis.json', 'w') as f:
 
 ```bash
 # 从电影截图生成 LUT
-lut-generator analyze \
+lut-generator extract \
   --input movie_frame.jpg \
   --output cinematic_lut.cube \
   --size 65 \
   --preview
 
-# 应用到你的视频素材
+# 应用到你的素材
 lut-generator apply \
   --input ./footage/ \
   --lut cinematic_lut.cube \
@@ -286,14 +274,29 @@ lut-generator apply \
   --batch
 ```
 
-### 场景 2：品牌色彩统一
+### 场景 2：从视频提取调色风格 🎬
+
+```bash
+# 从电影预告片提取整体风格
+lut-generator video-generate \
+  trailer.mp4 \
+  --sampling scene \
+  --output trailer_style.cube
+
+# 将电影风格应用到你的 Vlog
+lut-generator video-generate \
+  movie_trailer.mp4 \
+  --target my_vlog.mp4 \
+  --output my_vlog_graded.cube
+```
+
+### 场景 3：品牌色彩统一
 
 ```bash
 # 从品牌视觉素材生成统一风格
-lut-generator analyze \
+lut-generator extract \
   --input ./brand_assets/ \
   --output brand_lut.cube \
-  --weights "5,3,2" \
   --preview
 
 # 批量应用到所有内容
@@ -302,23 +305,6 @@ lut-generator apply \
   --lut brand_lut.cube \
   --output ./branded/ \
   --parallel
-```
-
-### 场景 3：摄影师个人风格
-
-```bash
-# 从代表作品生成个人风格 LUT
-lut-generator analyze \
-  --input ./portfolio/best_works/ \
-  --output my_style_lut.cube \
-  --size 33 \
-  --strength 0.7
-
-# 快速应用到新作品
-lut-generator apply \
-  --input new_photo.jpg \
-  --lut my_style_lut.cube \
-  --output new_photo_styled.jpg
 ```
 
 ---
@@ -341,31 +327,43 @@ lut-generator apply \
 
 ```
 lut-generator/
-├── lut-generator_server/      # Python 后端
+├── lut-generator_server/          # Python 后端
 │   ├── src/
-│   │   ├── color_analyzer.py      # 色彩分析
-│   │   ├── color_transfer.py      # Reinhard 色彩迁移
-│   │   ├── lut3d_generator.py     # 3D LUT 生成
-│   │   ├── cube_exporter_main.py  # .cube 导出
-│   │   ├── batch_analyzer.py      # 批量分析
-│   │   ├── feature_fusion.py      # 特征融合
-│   │   ├── lut_applier.py         # LUT 应用
-│   │   ├── preview_generator.py   # 预览图生成
-│   │   ├── visualizer.py          # 可视化
-│   │   ├── html_report.py         # HTML 报告
-│   │   ├── optimizer.py           # 性能优化
-│   │   └── cli.py                 # 命令行工具
-│   ├── tests/                     # 单元测试 (205+ 用例)
-│   ├── README.md                  # 详细文档
-│   ├── API.md                     # API 参考
+│   │   ├── lut_generator/         # 核心包（统一架构）
+│   │   │   ├── core/              # 核心算法
+│   │   │   │   ├── reinhard.py    # Reinhard 色彩迁移
+│   │   │   │   ├── style_extractor.py  # 风格提取
+│   │   │   │   ├── color_space.py # 色彩空间转换
+│   │   │   │   └── interpolation.py   # 插值算法
+│   │   │   ├── analysis/          # 色彩分析
+│   │   │   │   ├── analyzer.py    # 图像分析
+│   │   │   │   ├── batch_analyzer.py  # 批量分析
+│   │   │   │   └── feature_fusion.py  # 特征融合
+│   │   │   ├── lut/               # LUT 操作
+│   │   │   │   ├── lut3d.py       # 3D LUT 生成
+│   │   │   │   ├── applier.py     # LUT 应用
+│   │   │   │   └── exporter.py    # .cube 导出
+│   │   │   ├── video/             # 视频处理 🎬
+│   │   │   │   ├── frame_extractor.py # 帧提取
+│   │   │   │   └── analyzer.py    # 视频色彩分析
+│   │   │   ├── preview/           # 预览生成
+│   │   │   │   └── generator.py   # 对比图生成
+│   │   │   ├── utils/             # 工具模块
+│   │   │   │   ├── html_report.py # HTML 报告
+│   │   │   │   ├── optimizer.py   # 性能优化
+│   │   │   │   └── visualizer.py  # 可视化
+│   │   │   └── cli/               # 命令行入口
+│   │   │       └── main.py        # CLI 实现
+│   │   └── *.py                   # 向后兼容 shim（已弃用）
+│   ├── tests/                     # 单元测试
+│   ├── .github/workflows/ci.yml   # CI/CD 流水线
 │   └── pyproject.toml             # 项目配置
-├── lut-generator_skill/           # OpenClaw Skill
-│   ├── SKILL.md
-│   └── README.md
 ├── README.md                      # 本文件
 ├── lut-generator_prd.md           # PRD 文档
 └── lut-generator_tech-design.md   # 技术设计
 ```
+
+> **注意**：`src/` 根目录下的 `color_analyzer.py`、`cli.py` 等文件为向后兼容的 shim 包装器，已标记为 `DeprecationWarning`。新代码请直接引用 `lut_generator/` 包。
 
 ---
 
@@ -375,28 +373,33 @@ lut-generator/
 cd lut-generator_server
 
 # 运行所有测试
-./tests/run_tests.sh
-
-# 或使用 pytest
 pytest tests/ -v
 
 # 带覆盖率
-pytest tests/ --cov=src --cov-report=html
+pytest tests/ --cov=lut_generator --cov-report=html
 ```
-
-**测试覆盖**: 205+ 测试用例，94.8% 通过率
 
 ---
 
 ## 🛠️ 技术栈
 
-- **Python 3.11+**
-- **colour-science** - 专业色彩科学计算
-- **opencv-python** - 图像处理
-- **numpy** - 数值计算
-- **scipy** - 插值算法
-- **matplotlib** - 可视化
-- **Pillow** - 图像 I/O
+- **Python 3.10+**
+- **colour-science** — 专业色彩科学计算
+- **opencv-python** — 图像处理与视频帧提取
+- **numpy** — 数值计算
+- **scipy** — 插值算法
+- **matplotlib** — 可视化
+- **Pillow** — 图像 I/O
+
+---
+
+## 🔧 CI/CD
+
+项目使用 GitHub Actions 进行持续集成：
+
+- 自动运行测试（Python 3.10 / 3.11 / 3.12）
+- 代码风格检查（ruff）
+- 详见 [.github/workflows/ci.yml](lut-generator_server/.github/workflows/ci.yml)
 
 ---
 
@@ -406,7 +409,6 @@ pytest tests/ --cov=src --cov-report=html
 - [API 参考](lut-generator_server/API.md)
 - [PRD 文档](lut-generator_prd.md)
 - [技术设计](lut-generator_tech-design.md)
-- [最终交付报告](FINAL_DELIVERY_REPORT.md)
 
 ---
 
