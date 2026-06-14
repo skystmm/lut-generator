@@ -403,9 +403,57 @@ pytest tests/ --cov=lut_generator --cov-report=html
 
 项目使用 GitHub Actions 进行持续集成：
 
-- 自动运行测试（Python 3.10 / 3.11 / 3.12）
+- **自动运行测试**（Python 3.10 / 3.11 / 3.12）
 - 代码风格检查（ruff）
 - 详见 [.github/workflows/ci.yml](lut-generator_server/.github/workflows/ci.yml)
+
+---
+
+## 🗺️ 未来规划 / Roadmap
+
+下面这些方向**目前未实现**,记录在此供后续 contributor 参考;不构成承诺,欢迎在 issue 里讨论优先级。
+
+### 1. DNG Camera Profile (`.dcp`)
+
+比 .xmp 强得多的 Adobe 兼容方案:**不降维**,真正把完整 3D LUT 嵌进 Adobe DNG profile 体系。
+
+- **优势**:
+  - 保留全 3D 信息(33³ = 35,937 完整三元组),不像 .xmp `crs:ColorTable` 那样沿对角线降维
+  - 在 LR / ACR / PS 里支持"前向 LUT 应用"和"色域映射",精度高
+  - 跟相机厂商的 ICC profile 同体系,被 LR 视为"真·相机 profile"
+- **挑战**:
+  - DNG profile 是 Adobe 私有二进制格式,需要按 [DNG SDK](https://helpx.adobe.com/camera-raw/digital-negative.html) 的 spec 打包(Tag 0xC6A4 ColorMatrix1 / 0xC6A6 CalibrationIlluminant1 / 0xC6B7 ForwardMatrix* / 0xC6D7 ProfileToneCurve / 0xC6D9 ProfileLookTableDims / 0xC6DA ProfileLookTableData 等)
+  - 需引入 `pydng` / `dnglab` 或直接按 [Adobe DNG SDK](https://github.com/adobe/dng-sdk) 的 C++ 输出打包;**纯 Python 无官方实现**,一般做法是:Python 生成中间 JSON / 半成品二进制,然后调 `dnglab` / 自写 C 扩展完成最终打包
+  - 体积较大:33³ LUT 在 DNG 里约 4-5 MB(比 .cube 大几倍)
+- **落地路径**:
+  1. 先把 3D LUT 序列化成 spec 要求的 little-endian 二进制(`ProfileLookTableData` 段)
+  2. 用 `tifffile` 写最小 DNG wrapper
+  3. 准备一个示例 `.dcp` 用 LR 加载,确认色彩匹配
+- **CLI 设计**:`lut-generator extract photo.jpg -o look.dcp -s 33 -f dcp`
+
+### 2. Adobe `.look` 格式
+
+Camera Raw 滤镜的"Looks" 格式,本质是 **zip 包**(扩展名 `.look`)含 `Look.json` + `LUT.cube` + 缩略图。
+
+- **优势**:
+  - 结构简单,zip 内放已有的 .cube + 几行 JSON 元数据
+  - Camera Raw / Photoshop / Lightroom Classic 都能"打开 Look"
+  - 比 .xmp 强在 **保留完整 3D LUT**(不像 crs:ColorTable 降维)
+  - 比 .dcp 简单一个数量级
+- **挑战**:
+  - 缩略图必须 ≥ 256×256,得从参考图生成(或 LR 会显示占位)
+  - `Look.json` schema 需对齐 [Adobe Look SDK 文档](https://helpx.adobe.com/camera-raw/kb/camera-raw-look-template.html)
+  - PS / LR 加载 `.look` 时是按 zip 解析,签名校验松(只要 JSON schema 正确就能加载)
+- **落地路径**:
+  1. 用 `zipfile` 打包:`LUT.cube` + `Look.json` + `Thumb.png`(从参考图 downsample 到 256×256)
+  2. `Look.json` 字段:`name` / `group` / `tags` / `version` / `appearance` / `processVersion` / `toneCurvePV2012` (可选) / `colorTable` (可选) / `luminance` (可选)
+  3. 用 `Pillow` 写缩略图
+- **CLI 设计**:`lut-generator extract photo.jpg -o look.look -s 33 -f look --thumbnail`
+
+### 3. 短期会做的(规划中)
+
+- `lut-generator preset-info <file.xmp>` — 反向读 .xmp 打印分析(LR 调试有用)
+- 把 `apply_amount` / `process_version` 透传成 CLI flag(`-f xmp --amount 0.7 --process-version 15.4`)
 
 ---
 
