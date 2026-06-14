@@ -97,27 +97,35 @@ class LUT3DGenerator:
     
     def generate_from_images(self, source_path: Union[str, Path],
                              target_path: Union[str, Path],
-                             strength: float = 1.0) -> np.ndarray:
+                             strength: float = 1.0,
+                             raw_mode: str = 'half',
+                             use_camera_wb: bool = True) -> np.ndarray:
         """
         从图像文件生成 3D LUT
-        
+
         Args:
             source_path: 源图像路径
             target_path: 目标图像路径
             strength: 迁移强度
-            
+            raw_mode: RAW 文件读取档位 ('thumb' / 'half' / 'full')
+            use_camera_wb: RAW 是否用相机內建白平衡
+
         Returns:
             3D LUT 数组
         """
         from lut_generator.core.color_space import ColorSpaceConverter
         from lut_generator.core.reinhard import ReinhardColorTransfer
-        
+
         converter = ColorSpaceConverter()
         transfer = ReinhardColorTransfer()
-        
-        source_rgb = converter.load_image(source_path)
-        target_rgb = converter.load_image(target_path)
-        
+
+        source_rgb = converter.load_image(
+            source_path, raw_mode=raw_mode, use_camera_wb=use_camera_wb
+        )
+        target_rgb = converter.load_image(
+            target_path, raw_mode=raw_mode, use_camera_wb=use_camera_wb
+        )
+
         source_lab = converter.rgb_to_lab(source_rgb)
         target_lab = converter.rgb_to_lab(target_rgb)
         

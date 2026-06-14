@@ -169,21 +169,27 @@ class StyleExtractor:
     从单张调色后图片提取风格特征并生成模拟 LUT
     """
     
-    def __init__(self, 
+    def __init__(self,
                  baseline: NeutralBaseline = None,
                  grid_size: int = 33,
-                 strength: float = 1.0):
+                 strength: float = 1.0,
+                 raw_mode: str = 'half',
+                 use_camera_wb: bool = True):
         """
         初始化风格提取器
-        
+
         Args:
-            baseline: 中性基准，None 则使用默认
+            baseline: 中性基准,None 则使用默认
             grid_size: LUT 网格尺寸 (17, 33, 65)
             strength: 风格强度 (0-1)
+            raw_mode: RAW 文件读取档位 ('thumb' / 'half' / 'full')
+            use_camera_wb: RAW 是否用相机內建白平衡
         """
         self.baseline = baseline or NeutralBaseline()
         self.grid_size = grid_size
         self.strength = strength
+        self.raw_mode = raw_mode
+        self.use_camera_wb = use_camera_wb
         self.converter = ColorSpaceConverter()
     
     def extract_features(self, image_path: Union[str, Path]) -> StyleFeatures:
@@ -197,7 +203,9 @@ class StyleExtractor:
             StyleFeatures 对象
         """
         # 加载并转换到 Lab 空间
-        rgb = self.converter.load_image(image_path)
+        rgb = self.converter.load_image(
+            image_path, raw_mode=self.raw_mode, use_camera_wb=self.use_camera_wb
+        )
         lab = self.converter.rgb_to_lab(rgb)
         
         # 计算统计信息

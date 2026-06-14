@@ -24,6 +24,10 @@ LUT Generator 是一款专业的色彩工具，能够从参考图片或视频自
 
 **兼容软件**：DaVinci Resolve、Premiere Pro、Final Cut Pro、Photoshop、OBS 等所有支持 .cube 格式的专业软件。
 
+**支持的输入图片格式**:
+- 普通图像:.jpg / .png / .tif / .webp(通过 OpenCV)
+- **相机 RAW**:`.dng` / `.arw`(Sony) / `.cr2` `.cr3`(Canon) / `.nef`(Nikon) / `.rw2`(Panasonic) / `.raf`(Fuji) / `.orf`(Olympus) / `.pef`(Pentax) 等 600+ 机型(通过 rawpy/LibRaw)
+
 ---
 
 ## ✨ 功能特性
@@ -153,6 +157,34 @@ lut-generator analyze photo.jpg -o stats.json
 # 强制走 colour-science(更准,需要 scipy)
 lut-generator analyze photo.jpg --use-colour -o stats.json
 ```
+
+#### 📷 读取相机 RAW 照片(DNG / ARW / CR2 / NEF 等)
+
+所有子命令(`generate` / `analyze` / `transfer` / `extract` / `video-generate` / `video-extract`)都支持相机 RAW,通过 `rawpy` 解析。**默认参数完全兼容普通图**,RAW 才会走 demosaic 路径。
+
+```bash
+# 从 Sony ARW 提取风格 → LUT
+lut-generator extract IMG_0001.ARW -o style.cube -s 33
+
+# 从 Canon CR2 提取风格,调 RAW 档位
+lut-generator extract _MG_1234.CR2 -o look.cube -s 33 --raw-mode full
+
+# 从 Nikon NEF 跑色彩迁移(双图)
+lut-generator generate -i ref.NEF -t photo.NEF -o style.cube -s 33
+
+# 用相机內建缩略图(最快,精度低,适合大批量筛选)
+lut-generator extract *.ARW -o batch.cube --raw-mode thumb   # 配合 shell glob
+```
+
+**`--raw-mode` 3 档**:
+
+| 档位 | 速度 | 内存 | 精度 | 适合场景 |
+|---|---|---|---|---|
+| `thumb` | 几 ms | 极小 | 低(用相机內建 JPEG 缩略图)| 大批量筛选 / 快速预览 |
+| `half`(默认)| ~200ms/24MP | 1/4 全尺寸 | 中(半尺寸 demosaic)| **日常推荐** |
+| `full` | 1-2s/24MP | 全尺寸 | 高(全尺寸 AHD demosaic)| 最终出图 |
+
+**`--raw-wb` / `--no-raw-wb`**:控制是否用相机內建白平衡(默认开启,避免 RAW 偏色极端;关闭后由用户自己处理白平衡)。
 
 ---
 

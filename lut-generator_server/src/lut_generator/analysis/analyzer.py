@@ -76,12 +76,17 @@ class ColorAnalyzer:
     提供完整的图像色彩特征提取功能
     """
     
-    def __init__(self, use_colour: bool = True):
+    def __init__(self, use_colour: bool = True, raw_mode: str = 'half',
+                 use_camera_wb: bool = True):
         self.converter = ColorSpaceConverter(use_colour=use_colour)
-    
+        self.raw_mode = raw_mode
+        self.use_camera_wb = use_camera_wb
+
     def load_image(self, image_path: Union[str, Path]) -> np.ndarray:
-        """加载图像"""
-        return self.converter.load_image(image_path)
+        """加载图像(支持相机 RAW,通过构造时的 raw_mode 决定档位)"""
+        return self.converter.load_image(
+            image_path, raw_mode=self.raw_mode, use_camera_wb=self.use_camera_wb
+        )
     
     def rgb_to_lab(self, rgb: np.ndarray) -> np.ndarray:
         """RGB 转 Lab"""

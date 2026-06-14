@@ -32,6 +32,7 @@ OpenClaw / Hermes 没有 `lut_generator_skill` 这个 importable Python 包。**
 | "输出 photo.jpg 的色彩统计" | `lut-generator analyze photo.jpg -o stats.json` |
 | "从 trailer.mp4 提取风格" | `lut-generator video-extract trailer.mp4 -o trailer.cube --analyze` |
 | "生成 LR/PS 预设 (.xmp)" | `lut-generator extract photo.jpg -o look.xmp -s 33 -f xmp` |
+| "从 RAW 提取风格 (DNG/ARW/CR2/NEF)" | `lut-generator extract IMG_0001.ARW -o style.cube -s 33` |
 
 ---
 

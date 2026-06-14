@@ -23,11 +23,33 @@ def create_parser() -> argparse.ArgumentParser:
         prog='lut-generator',
         description='Generate 3D LUTs from reference images using Reinhard color transfer'
     )
-    
+
+    # 全局 RAW 选项(对所有子命令生效)
+    # 注:Python argparse 子命令不自动继承父级 flag,需要在每个 subparser
+    # 显式 add_argument(共享相同 dest)。下面把这两个 flag 的 kwargs 抽出来复用。
+    _RAW_MODE_KW = dict(
+        type=str, default='half',
+        choices=['thumb', 'half', 'full'],
+        dest='raw_mode',
+        help='相机 RAW 读取档位: thumb=內建缩略图(快), '
+             'half=半尺寸 demosaic(默认), full=全尺寸(慢)',
+    )
+    _RAW_WB_ON = dict(action='store_true', default=True, dest='raw_wb',
+                      help='RAW 用相机內建白平衡(默认 True,避免偏色)')
+    _RAW_WB_OFF = dict(action='store_false', dest='raw_wb',
+                       help='RAW 不用相机內建白平衡(用户自己做白平衡)')
+
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
+
+    # --- shared helper: 给 subparser 加 RAW flags ---
+    def _add_raw_flags(subparser):
+        subparser.add_argument('--raw-mode', **_RAW_MODE_KW)
+        subparser.add_argument('--raw-wb', **_RAW_WB_ON)
+        subparser.add_argument('--no-raw-wb', **_RAW_WB_OFF)
     
     # generate 子命令
     gen_parser = subparsers.add_parser('generate', help='Generate 3D LUT from images')
+    _add_raw_flags(gen_parser)
     gen_parser.add_argument('-i', '--input', '--source', type=str, required=True,
                             dest='source', help='Source/reference image path')
     gen_parser.add_argument('-t', '--target', type=str, required=True,
@@ -49,6 +71,7 @@ def create_parser() -> argparse.ArgumentParser:
     
     # analyze 子命令
     analyze_parser = subparsers.add_parser('analyze', help='Analyze image color statistics')
+    _add_raw_flags(analyze_parser)
     analyze_parser.add_argument('image', type=str, help='Image path to analyze')
     analyze_parser.add_argument('-o', '--output', type=str, default=None,
                                 help='Output JSON file path (default: print to stdout)')
@@ -57,6 +80,7 @@ def create_parser() -> argparse.ArgumentParser:
     
     # transfer 子命令
     transfer_parser = subparsers.add_parser('transfer', help='Apply color transfer to image')
+    _add_raw_flags(transfer_parser)
     transfer_parser.add_argument('-i', '--input', '--source', type=str, required=True,
                                  dest='source', help='Source/reference image path')
     transfer_parser.add_argument('-t', '--target', type=str, required=True,
@@ -164,8 +188,9 @@ def create_parser() -> argparse.ArgumentParser:
     )
     
     # extract 子命令 - 单图风格提取
-    extract_parser = subparsers.add_parser('extract', 
+    extract_parser = subparsers.add_parser('extract',
                                            help='Extract style from single image and generate LUT')
+    _add_raw_flags(extract_parser)
     extract_parser.add_argument('image', type=str, 
                                 help='Graded image path to extract style from')
     extract_parser.add_argument('-o', '--output', type=str, required=True,
@@ -206,12 +231,18 @@ def cmd_generate(args: argparse.Namespace) -> int:
     
     print(f"Generating LUT from {source_path.name} -> {target_path.name}")
     print(f"Grid size: {args.size}, Strength: {args.strength}")
-    
+    if source_path.suffix.lower() in {'.dng', '.arw', '.cr2', '.cr3', '.nef', '.rw2', '.raf', '.orf', '.pef'} \
+            or target_path.suffix.lower() in {'.dng', '.arw', '.cr2', '.cr3', '.nef', '.rw2', '.raf', '.orf', '.pef'}:
+        print(f"RAW mode: {args.raw_mode}, use_camera_wb: {args.raw_wb}")
+
     # 生成 LUT
     lut_config = LUT3DConfig(grid_size=args.size)
     generator = LUT3DGenerator(lut_config)
-    
-    lut_data = generator.generate_from_images(source_path, target_path, args.strength)
+
+    lut_data = generator.generate_from_images(
+        source_path, target_path, args.strength,
+        raw_mode=args.raw_mode, use_camera_wb=args.raw_wb,
+    )
     
     # 设置元数据
     metadata = {
@@ -243,7 +274,9 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     
     print(f"Analyzing: {image_path.name}")
     
-    analyzer = ColorAnalyzer(use_colour=args.use_colour)
+    analyzer = ColorAnalyzer(use_colour=args.use_colour,
+                             raw_mode=args.raw_mode,
+                             use_camera_wb=args.raw_wb)
     result = analyzer.analyze(image_path)
     
     output = result.to_dict()
@@ -279,11 +312,14 @@ def cmd_transfer(args: argparse.Namespace) -> int:
         return 1
     
     print(f"Applying color transfer: {source_path.name} -> {target_path.name}")
-    
+
     transfer = ReinhardColorTransfer()
     config = TransferConfig(strength=args.strength)
-    
-    result = transfer.transfer_images(source_path, target_path, config)
+
+    result = transfer.transfer_images(
+        source_path, target_path, config,
+        raw_mode=args.raw_mode, use_camera_wb=args.raw_wb,
+    )
     
     # 保存结果
     rgb_uint8 = result.to_rgb_uint8()
@@ -321,7 +357,9 @@ def cmd_extract(args: argparse.Namespace) -> int:
     extractor = StyleExtractor(
         baseline=baseline,
         grid_size=args.size,
-        strength=args.strength
+        strength=args.strength,
+        raw_mode=args.raw_mode,
+        use_camera_wb=args.raw_wb,
     )
     
     result = extractor.generate_lut(image_path, args.strength)

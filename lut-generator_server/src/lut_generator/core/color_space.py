@@ -37,26 +37,28 @@ class ColorSpaceConverter:
         if not self.use_colour:
             print("Warning: colour-science not installed. Using OpenCV for color conversion.")
     
-    def load_image(self, image_path: Union[str, Path]) -> np.ndarray:
+    def load_image(self, image_path: Union[str, Path],
+                   raw_mode: str = 'half',
+                   use_camera_wb: bool = True) -> np.ndarray:
         """
         加载图像并转换为 RGB 格式
-        
+
+        支持相机 RAW (.dng / .arw / .cr2 / .cr3 / .nef / .rw2 / .raf / .orf
+        / .pef 等 600+ 机型) 通过 rawpy;非 RAW 走 OpenCV 兜底。
+
         Args:
             image_path: 图像文件路径
-            
+            raw_mode: 仅对 RAW 文件生效
+                - 'thumb' — 相机內建 JPEG 缩略图(几 ms)
+                - 'half'  — 半尺寸 demosaic + 8-bit RGB(默认,~200ms/24MP)
+                - 'full'  — 全尺寸 demosaic + 16-bit(自动转 8-bit,~1-2s/24MP)
+            use_camera_wb: RAW 是否用相机內建白平衡(默认 True 避免偏色)
+
         Returns:
             RGB 格式的 numpy 数组，值范围 0-255
         """
-        image_path = Path(image_path)
-        if not image_path.exists():
-            raise FileNotFoundError(f"Image not found: {image_path}")
-        
-        img_bgr = cv2.imread(str(image_path))
-        if img_bgr is None:
-            raise ValueError(f"Failed to load image: {image_path}")
-        
-        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        return img_rgb
+        from lut_generator.utils.image_loader import load_image as _load
+        return _load(image_path, raw_mode=raw_mode, use_camera_wb=use_camera_wb)
     
     def rgb_to_lab(self, rgb: np.ndarray) -> np.ndarray:
         """

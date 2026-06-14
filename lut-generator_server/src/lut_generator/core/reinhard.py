@@ -205,20 +205,28 @@ class ReinhardColorTransfer:
     
     def transfer_images(self, source_path: Union[str, Path],
                         target_path: Union[str, Path],
-                        config: TransferConfig = None) -> TransferResult:
+                        config: TransferConfig = None,
+                        raw_mode: str = 'half',
+                        use_camera_wb: bool = True) -> TransferResult:
         """
         从图像文件执行色彩迁移
-        
+
         Args:
-            source_path: 源图像（参考图）路径
+            source_path: 源图像(参考图)路径
             target_path: 目标图像路径
             config: 迁移配置
-            
+            raw_mode: RAW 读取档位
+            use_camera_wb: RAW 是否用相机內建白平衡
+
         Returns:
             TransferResult 对象
         """
-        source_rgb = self.converter.load_image(source_path)
-        target_rgb = self.converter.load_image(target_path)
+        source_rgb = self.converter.load_image(
+            source_path, raw_mode=raw_mode, use_camera_wb=use_camera_wb
+        )
+        target_rgb = self.converter.load_image(
+            target_path, raw_mode=raw_mode, use_camera_wb=use_camera_wb
+        )
         
         source_lab = self.converter.rgb_to_lab(source_rgb)
         target_lab = self.converter.rgb_to_lab(target_rgb)

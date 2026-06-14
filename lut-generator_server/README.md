@@ -8,6 +8,8 @@
 基于图片分析自动生成 3D LUT (.cube 格式) 的专业工具。使用 Reinhard 色彩迁移算法和特征融合技术，从参考图片提取色彩特征，生成可用于视频/图像调色的标准 LUT 文件。
 
 > **CLI 入口**:`lut-generator` 命令由 `src/lut_generator/cli/main.py` 注册;`src/cli.py` 为已弃用的兼容 shim,新代码请直接使用 `lut_generator.cli.main`。本文档所有命令均以 `lut-generator` 形式给出,直接调用可用 `python -m lut_generator.cli.main <subcmd>`。
+>
+> **支持格式**:普通图片(.jpg/.png/.tif/.webp)+ 相机 RAW(.dng/.arw/.cr2/.cr3/.nef/.rw2/.raf/.orf/.pef 等 600+ 机型,通过 rawpy)。RAW 档位用 `--raw-mode thumb|half|full` 控制。
 
 ---
 
@@ -142,6 +144,45 @@ LUTExporter(lut_data, metadata).export('my_look.xmp', format='xmp')
 analyzer = ColorAnalyzer(use_colour=False)
 stats = analyzer.analyze(Path('photo.jpg'))
 ```
+
+#### 📷 读取相机 RAW 照片
+
+```python
+from pathlib import Path
+from lut_generator.utils.image_loader import load_image, get_raw_metadata, RawMode
+
+# 1) 统一入口:RAW/普通图都走 load_image,自动嗅探
+rgb = load_image('IMG_0001.ARW', raw_mode=RawMode.HALF)  # 半尺寸 demosaic(默认)
+rgb_thumb = load_image('_MG_1234.CR2', raw_mode='thumb')   # 相机內建缩略图(快)
+rgb_full  = load_image('DSC_0001.NEF', raw_mode='full')    # 全尺寸 AHD demosaic(慢)
+
+# 2) Python API 各个类都接受 raw_mode 参数,默认 half,完全向后兼容
+from lut_generator.lut.lut3d import LUT3DGenerator, LUT3DConfig
+gen = LUT3DGenerator(LUT3DConfig(grid_size=33))
+lut = gen.generate_from_images('ref.ARW', 'photo.ARW', strength=0.8, raw_mode='full')
+
+from lut_generator.core.style_extractor import StyleExtractor
+ext = StyleExtractor(grid_size=33, raw_mode='half', use_camera_wb=True)
+result = ext.generate_lut(image_path='graded.DNG')
+
+from lut_generator.analysis.analyzer import ColorAnalyzer
+analyzer = ColorAnalyzer(raw_mode='thumb')
+stats = analyzer.analyze('IMG_0001.ARW')
+
+# 3) 读 RAW 元数据(机型/ISO/快门/光圈)
+meta = get_raw_metadata('IMG_0001.ARW')
+# {'is_raw': True, 'camera_make': 'SONY', 'camera_model': 'ILCE-7M3',
+#  'raw_width': 6048, 'raw_height': 4024, 'num_colors': 3,
+#  'iso_speed': 100, 'shutter': 0.01, 'aperture': 2.8}
+```
+
+**`raw_mode` 3 档对比**:
+
+| 档位 | 速度 | 内存 | 精度 | 适合 |
+|---|---|---|---|---|
+| `thumb` | 几 ms | 极小 | 低(用相机內建 JPEG 缩略图)| 大批量筛选 / 快速预览 |
+| `half`(默认)| ~200ms/24MP | 1/4 全尺寸 | 中(半尺寸 demosaic)| 日常推荐 |
+| `full` | 1-2s/24MP | 全尺寸 | 高(全尺寸 AHD demosaic)| 最终出图 |
 
 > 旧的 README 列出的 `from lut3d_generator import ...` / `from lut_applier import ...` / `from preview_generator import ...` 等**根级模块导入路径均已弃用**,会触发 `DeprecationWarning` 并指向 shim;新代码请用上面 `lut_generator.*` 包路径。`html_report` / `visualizer` 已迁到 `lut_generator.utils.*`。
 
