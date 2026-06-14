@@ -35,7 +35,7 @@ def create_parser() -> argparse.ArgumentParser:
     gen_parser.add_argument('-o', '--output', type=str, required=True,
                             help='Output LUT file path')
     gen_parser.add_argument('-f', '--format', type=str, default='cube',
-                            choices=['cube', '3dl', 'clf'],
+                            choices=['cube', '3dl', 'clf', 'xmp'],
                             help='Output format (default: cube)')
     gen_parser.add_argument('-s', '--size', type=int, default=33,
                             choices=[17, 33, 65],
@@ -85,7 +85,7 @@ def create_parser() -> argparse.ArgumentParser:
     )
     video_gen_parser.add_argument(
         '-f', '--format', type=str, default='cube',
-        choices=['cube', '3dl', 'clf'],
+        choices=['cube', '3dl', 'clf', 'xmp'],
         help='Output format (default: cube)'
     )
     video_gen_parser.add_argument(
@@ -134,7 +134,7 @@ def create_parser() -> argparse.ArgumentParser:
     )
     video_ext_parser.add_argument(
         '-f', '--format', type=str, default='cube',
-        choices=['cube', '3dl', 'clf'],
+        choices=['cube', '3dl', 'clf', 'xmp'],
         help='Output format (default: cube)'
     )
     video_ext_parser.add_argument(
@@ -171,7 +171,7 @@ def create_parser() -> argparse.ArgumentParser:
     extract_parser.add_argument('-o', '--output', type=str, required=True,
                                 help='Output LUT file path')
     extract_parser.add_argument('-f', '--format', type=str, default='cube',
-                                choices=['cube', '3dl', 'clf'],
+                                choices=['cube', '3dl', 'clf', 'xmp'],
                                 help='Output format (default: cube)')
     extract_parser.add_argument('-s', '--size', type=int, default=33,
                                 choices=[17, 33, 65],

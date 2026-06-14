@@ -51,12 +51,18 @@ lut-generator extract graded.jpg -o style.cube -s 33 \
 #### 2. 双图色彩迁移 → LUT(`generate`,Reinhard 风格匹配)
 
 ```bash
-# 把 source 的色彩风格迁移到 target,生成 LUT
+# LUT 生成 -o style.cube -s 33 [-f cube|3dl|clf|xmp]
 lut-generator generate -i source.jpg -t target.jpg -o style.cube -s 33
 
 # 指定标题/描述/格式
 lut-generator generate -i source.jpg -t target.jpg -o style.cube \
   -s 65 --strength 0.8 --title "Cinematic Teal" --description "v1"
+
+# 导出为 Adobe Lightroom / Photoshop 兼容的 XMP 预设
+# (把 3D LUT 沿对角线降维成 crs:ColorTable,LR/ACR/PS 都能直接加载)
+lut-generator extract graded.jpg -o my_look.xmp -s 33 -f xmp
+lut-generator generate -i source.jpg -t target.jpg -o my_look.xmp -s 33 -f xmp \
+  --title "My LR Preset" --strength 0.8
 ```
 
 #### 3. 把色彩迁移直接应用到图片(`transfer`,不出 LUT)
@@ -120,7 +126,19 @@ lut_data = generator.generate_from_images('source.jpg', 'target.jpg', strength=0
 metadata = {'title': 'My Style', 'description': 'demo'}
 LUTExporter(lut_data, metadata).export('output.cube', format='cube')
 
-# 4) 色彩统计(对应 CLI: lut-generator analyze)
+# 4) 导出为 Adobe Lightroom / Photoshop 兼容的 .xmp 预设
+# (LUTExporter 沿主对角线降维成 3 × 256 整数,写入 crs:ColorTable)
+LUTExporter(lut_data, metadata).export_xmp_preset(
+    'my_look.xmp',
+    title='My LR Preset',        # crs:Name
+    group='MyBrand:Looks',       # crs:Cluster (LR 分组)
+    apply_amount=1.0,            # 0-1,Amount 滑块初值
+    process_version='15.4',      # LR CC 2020+
+)
+# 通用 dispatch 也支持:
+LUTExporter(lut_data, metadata).export('my_look.xmp', format='xmp')
+
+# 5) 色彩统计(对应 CLI: lut-generator analyze)
 analyzer = ColorAnalyzer(use_colour=False)
 stats = analyzer.analyze(Path('photo.jpg'))
 ```

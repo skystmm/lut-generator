@@ -93,6 +93,14 @@ lut-generator extract graded_photo.jpg -o style.cube -s 33 --strength 0.7 --anal
 
 > 旧版 README 写的 `lut-generator extract --input ...` **不存在**;`extract` 的图是位置参数,不是 `--input`。
 
+#### 📌 导出为 Adobe Lightroom / Photoshop 预设(XMP)
+
+```bash
+# 加 -f xmp 即可输出 Adobe .xmp 预设,LR / LR Classic / ACR / PS 都能直接加载
+lut-generator extract graded_photo.jpg -o my_look.xmp -s 33 -f xmp
+lut-generator generate -i ref.jpg -t photo.jpg -o my_look.xmp -s 33 -f xmp --title "My Look"
+```
+
 #### 2️⃣ 色彩迁移生成 LUT(双图)
 
 ```bash

@@ -163,6 +163,182 @@ class LUTExporter:
         except OSError as e:
             raise OSError(f"OS error while writing CLF file to {filepath}: {e}") from e
     
+    def export_xmp_preset(self,
+                          filepath: Union[str, Path],
+                          title: str = None,
+                          group: str = 'lut-generator:UserPresets',
+                          preset_type: str = 'Normal',
+                          apply_amount: float = 1.0,
+                          process_version: str = '15.4',
+                          include_slider: bool = True,
+                          supports_amount: bool = True,
+                          copy_to_clipboard: bool = False) -> None:
+        """
+        导出为 Adobe XMP 预设 (.xmp),可被 Lightroom / Lightroom Classic /
+        Adobe Camera Raw / Photoshop (经 ACR) 加载应用。
+
+        原理:把 3D LUT 沿主对角线 (i, i, i) 降维成 3 条 256 点的 1D 映射
+        (R/G/B 各 256),写入 XMP `crs:ColorTable`(空格分隔的 0-65535 整数)。
+        这是 Adobe 创意预设(包含「颜色查找表」/LUT 类)的标准存放位置。
+
+        Args:
+            filepath: 输出 .xmp 路径
+            title: 预设名称(同时作为 .xmp 文件名建议)
+            group: 在 LR 预设面板中的分组(默认 `lut-generator:UserPresets`)
+            preset_type: `Normal` / `Auto` / `Video` (LR 分类)
+            apply_amount: 0.0-1.0,预设应用强度
+            process_version: `crs:ProcessVersion`,LR 用 15.4 (CC 2020+)
+            include_slider: 是否带 Amount 滑块
+            supports_amount: `crs:SupportsAmount`
+            copy_to_clipboard: 仅在 XMP 里写 `crs:Cluster` 提示,不影响功能
+        """
+        filepath = Path(filepath)
+        if filepath.suffix == '':
+            filepath = filepath.with_suffix('.xmp')
+
+        title = title or self.metadata.get('title', 'LUT Preset')
+        title = self._xml_escape(title)
+        group = self._xml_escape(group)
+        preset_type = self._xml_escape(preset_type)
+
+        # 1) 沿主对角线 (i, i, i) 采样 → 3 条 1D 256-entry 映射
+        r_table, g_table, b_table = self._lut_to_color_table()
+
+        # 2) 拼成 768 个空格分隔的 0-65535 整数
+        color_table = ' '.join(
+            f"{r_table[i]:d} {g_table[i]:d} {b_table[i]:d}"
+            for i in range(256)
+        )
+
+        # 3) 拼 XMP(参照 Lightroom Classic 创意预设的字段集合)
+        xmp = self._build_xmp_preset_xml(
+            title=title,
+            group=group,
+            preset_type=preset_type,
+            color_table=color_table,
+            apply_amount=apply_amount,
+            process_version=process_version,
+            include_slider=include_slider,
+            supports_amount=supports_amount,
+            copy_to_clipboard=copy_to_clipboard,
+        )
+
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(xmp)
+        except IOError as e:
+            raise IOError(f"Failed to write XMP preset to {filepath}: {e}") from e
+        except OSError as e:
+            raise OSError(f"OS error while writing XMP preset to {filepath}: {e}") from e
+
+    def _lut_to_color_table(self) -> tuple:
+        """
+        沿主对角线 (i, i, i) 采样 3D LUT,得到 3 条 1D 256-entry 映射。
+        输入坐标 = (i/255, i/255, i/255) → 输出 RGB 截到 [0,1] → 量化到 16-bit。
+
+        当 grid_size == 256 时,直接取对角线;否则用 numpy 三线性插值
+        沿对角线采 256 点(避免强依赖 scipy)。
+        """
+        if self.grid_size == 256:
+            diag = self.lut_data[np.arange(256), np.arange(256), np.arange(256)]
+        else:
+            diag = self._trilinear_diag(self.lut_data, 256)
+
+        diag = np.clip(diag, 0.0, 1.0)
+        diag_int = np.round(diag * 65535).astype(np.uint32)
+        return diag_int[:, 0].tolist(), diag_int[:, 1].tolist(), diag_int[:, 2].tolist()
+
+    @staticmethod
+    def _trilinear_diag(lut: np.ndarray, samples: int) -> np.ndarray:
+        """
+        沿主对角线方向做三线性插值。纯 numpy 实现,不依赖 scipy。
+
+        把对角线方向归一化到 0..1,在 0..1 上等距采 `samples` 个点,
+        然后逐点三线性插值。
+        """
+        N = lut.shape[0]  # grid_size
+        if N == 1:
+            return np.broadcast_to(lut[0, 0, 0], (samples, 3)).copy()
+
+        t = np.linspace(0.0, 1.0, samples)  # (samples,)
+        # 在 N³ 网格坐标里 = t * (N-1)
+        pos = t * (N - 1)                    # (samples,)
+        idx0 = np.floor(pos).astype(np.int64)
+        idx1 = np.minimum(idx0 + 1, N - 1)
+        frac = (pos - idx0).astype(np.float32)  # (samples,)
+
+        # 在三个维度上同时插值(因为对角线 r=g=b,所以每维都是 frac)
+        f = frac  # (samples,)
+        f0 = 1.0 - f
+
+        # 取 8 个角的 RGB
+        v000 = lut[idx0, idx0, idx0]   # (samples, 3)
+        v100 = lut[idx1, idx0, idx0]
+        v010 = lut[idx0, idx1, idx0]
+        v110 = lut[idx1, idx1, idx0]
+        v001 = lut[idx0, idx0, idx1]
+        v101 = lut[idx1, idx0, idx1]
+        v011 = lut[idx0, idx1, idx1]
+        v111 = lut[idx1, idx1, idx1]
+
+        # 8 角分别加权
+        c000 = f0 * f0 * f0
+        c100 = f  * f0 * f0
+        c010 = f0 * f  * f0
+        c110 = f  * f  * f0
+        c001 = f0 * f0 * f
+        c101 = f  * f0 * f
+        c011 = f0 * f  * f
+        c111 = f  * f  * f
+
+        # (samples, 1) 广播到 (samples, 3)
+        out = (
+            v000 * c000[:, None] + v100 * c100[:, None] +
+            v010 * c010[:, None] + v110 * c110[:, None] +
+            v001 * c001[:, None] + v101 * c101[:, None] +
+            v011 * c011[:, None] + v111 * c111[:, None]
+        )
+        return out
+
+    @staticmethod
+    def _xml_escape(s: str) -> str:
+        return (s.replace('&', '&amp;')
+                 .replace('<', '&lt;')
+                 .replace('>', '&gt;')
+                 .replace('"', '&quot;')
+                 .replace("'", '&apos;'))
+
+    def _build_xmp_preset_xml(self,
+                              title: str,
+                              group: str,
+                              preset_type: str,
+                              color_table: str,
+                              apply_amount: float,
+                              process_version: str,
+                              include_slider: bool,
+                              supports_amount: bool,
+                              copy_to_clipboard: bool) -> str:
+        amount_block = (
+            f'   <crs:Amount>{apply_amount:.4f}</crs:Amount>\n'
+            if include_slider else ''
+        )
+        return f'''<?xml version="1.0" encoding="UTF-8"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="lut-generator 1.0">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+    crs:PresetType="{preset_type}"
+    crs:Cluster="{group}"
+    crs:Name="{title}"
+    crs:SupportsAmount="{'True' if supports_amount else 'False'}"
+    crs:ProcessVersion="{process_version}"
+    crs:ColorTableVersion="1"
+    crs:ColorTable="{color_table}">
+{amount_block}  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
+'''
+
     def export(self, filepath: Union[str, Path], 
                format: str = 'cube',
                **kwargs) -> None:
@@ -171,8 +347,9 @@ class LUTExporter:
         
         Args:
             filepath: 输出文件路径
-            format: 输出格式 ('cube', '3dl', 'clf')
+            format: 输出格式 ('cube', '3dl', 'clf', 'xmp')
             **kwargs: 格式特定参数
+                - xmp: title / group / preset_type / apply_amount / process_version
         """
         format = format.lower()
         
@@ -182,6 +359,8 @@ class LUTExporter:
             self.export_3dl(filepath, **kwargs)
         elif format == 'clf':
             self.export_clf(filepath, **kwargs)
+        elif format == 'xmp':
+            self.export_xmp_preset(filepath, **kwargs)
         else:
             raise ValueError(f"Unknown format: {format}")
 
