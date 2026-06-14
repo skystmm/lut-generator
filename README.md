@@ -78,116 +78,73 @@ pip install -e .
 
 ### 基础使用
 
-#### 1️⃣ 从图片生成 LUT
+> **所有命令以 `lut-generator` 子命令形式调用。**可用子命令:`analyze` / `generate` / `transfer` / `extract` / `video-generate` / `video-extract`。
+> 跑 `lut-generator --help` 看完整签名。
+
+#### 1️⃣ 从图片生成 LUT(单图反向提取)
 
 ```bash
-# 从单张图片提取风格
-lut-generator extract \
-  --input graded_photo.jpg \
-  --output style.cube \
-  --size 33
+# 真实命令:extract 接位置参数 <image> + 必填 -o
+lut-generator extract graded_photo.jpg -o style.cube -s 33
 
-# 带强度调节 + 预览
-lut-generator extract \
-  --input graded_photo.jpg \
-  --output style.cube \
-  --strength 0.7 \
-  --preview
+# 调强度 + 输出风格分析
+lut-generator extract graded_photo.jpg -o style.cube -s 33 --strength 0.7 --analyze
 ```
 
-#### 2️⃣ 色彩迁移生成 LUT
+> 旧版 README 写的 `lut-generator extract --input ...` **不存在**;`extract` 的图是位置参数,不是 `--input`。
+
+#### 2️⃣ 色彩迁移生成 LUT(双图)
 
 ```bash
-# 将参考图的色彩风格应用到目标图
-lut-generator generate \
-  --input reference.jpg \
-  --target photo.jpg \
-  --output style.cube \
-  --size 33
+# 真实命令:generate 必填 -i -t -o
+lut-generator generate -i reference.jpg -t photo.jpg -o style.cube -s 33
 
-# 多张图片（批量）
-lut-generator generate \
-  --input ./references/ \
-  --target ./photos/ \
-  --output style.cube \
-  --batch
+# 自带强度调节
+lut-generator generate -i reference.jpg -t photo.jpg -o style.cube -s 33 --strength 0.8
 ```
 
-#### 3️⃣ 应用 LUT 到图片
+> `--batch` 标志已移除,多图批量请用 Python API(见下)。
+
+#### 3️⃣ 应用 LUT 到图片(色彩迁移直接出图,不出 LUT)
 
 ```bash
-# 单张
-lut-generator apply \
-  --input photo.jpg \
-  --lut style.cube \
-  --output photo_styled.jpg
-
-# 批量 + 并行
-lut-generator apply \
-  --input ./photos/ \
-  --lut style.cube \
-  --output ./styled/ \
-  --batch \
-  --parallel
+# transfer 子命令:把 source 的色彩风格直接迁移到 target
+lut-generator transfer -i reference.jpg -t photo.jpg -o photo_styled.jpg --strength 0.8
 ```
+
+> 旧版 README 写的 `lut-generator apply --input ... --lut ...` **不存在**。要应用"已生成的 .cube"到新图,用 Python 调 `LUTApplier` 加载 .cube 后 apply。
 
 #### 4️⃣ 从视频生成 LUT 🎬
 
 ```bash
-# 从单个视频提取风格
-lut-generator video-generate \
-  source_video.mp4 \
-  --output video_style.cube
+# 单视频反向提取风格
+lut-generator video-extract source_video.mp4 -o video_style.cube -s 33 --analyze
 
-# 将视频 A 的风格应用到视频 B
-lut-generator video-generate \
-  style_source.mp4 \
-  --target target_video.mp4 \
-  --output graded_video.cube
+# 视频→视频 风格迁移
+lut-generator video-generate style_source.mp4 -t target_video.mp4 -o graded_video.cube
 
-# 场景模式（自动检测场景分段）
-lut-generator video-generate \
-  movie.mp4 \
-  --sampling scene \
-  --output cinematic.cube
+# 场景模式(自动检测场景分段)
+lut-generator video-generate movie.mp4 -o cinematic.cube --strategy scene
 
-# 自适应采样（根据画面变化自动调整）
-lut-generator video-generate \
-  vlog.mp4 \
-  --sampling adaptive \
-  --max-frames 50 \
-  --output vlog_style.cube
+# 自适应采样
+lut-generator video-generate vlog.mp4 -o vlog_style.cube --strategy adaptive --max-frames 50
 ```
 
-**视频采样策略**：
-- `uniform` — 均匀间隔采样（默认）
-- `scene` — 基于场景分割，每个场景采样代表性帧
-- `adaptive` — 根据画面变化程度自适应调整采样密度
+> 视频采样参数:
+> - `--strategy` 取值 `uniform` / `scene` / `adaptive`(旧版 README 写成 `--sampling`,已改名为 `--strategy`)
+> - `--sample-rate` 每秒采样帧数(默认 1.0)
+> - `--max-frames` 最大采样帧数(默认 100)
+> - `--scene-threshold` 场景检测阈值(默认 0.3)
 
 #### 5️⃣ 色彩分析
 
 ```bash
-# 分析图片色彩统计
-lut-generator analyze photo.jpg
-
-# 输出到 JSON
+# 单图统计(只输出 JSON 统计,不出 LUT)
 lut-generator analyze photo.jpg -o stats.json
+
+# 强制走 colour-science(更准,需要 scipy)
+lut-generator analyze photo.jpg --use-colour -o stats.json
 ```
-
-#### 6️⃣ 生成完整报告
-
-```bash
-lut-generator report \
-  --reference style_reference.jpg \
-  --input original.jpg \
-  --output ./report/
-```
-
-**输出**：
-- `report.html` — 交互式 HTML 报告（滑块对比）
-- `histogram.png` — RGB 直方图对比
-- `gamut.png` — Lab 色域图对比
-- `statistics.json` — 色彩统计数据
 
 ---
 
@@ -196,6 +153,7 @@ lut-generator report \
 ### 基础用法
 
 ```python
+# 真实存在的模块路径(以 src/lut_generator/ 为准)
 from lut_generator.lut.lut3d import LUT3DGenerator, LUT3DConfig
 from lut_generator.lut.exporter import LUTExporter
 
@@ -203,15 +161,18 @@ from lut_generator.lut.exporter import LUTExporter
 config = LUT3DConfig(
     grid_size=33,        # 33³ 精度
     smoothness=0.5,      # 平滑度
-    strength=0.8         # 迁移强度
 )
 
-# 生成并导出
+# 双图色彩迁移
 generator = LUT3DGenerator(config)
-lut_data = generator.generate(reference_image, target_image)
+lut_data = generator.generate_from_images(
+    'reference.jpg', 'target.jpg', strength=0.8
+)
+# 注意:方法名是 generate_from_images(...),不是 generate(...)
 
-exporter = LUTExporter()
-exporter.export(lut_data, 'output.cube', title='My Style')
+# 导出 .cube / .3dl / .clf
+LUTExporter(lut_data, {'title': 'My Style', 'description': 'demo'}) \
+    .export('output.cube', format='cube')
 ```
 
 ### 视频 LUT API 🎬
@@ -259,52 +220,41 @@ print(f"Contrast: {features.contrast:.3f}")
 ### 场景 1：电影风格调色
 
 ```bash
-# 从电影截图生成 LUT
-lut-generator extract \
-  --input movie_frame.jpg \
-  --output cinematic_lut.cube \
-  --size 65 \
-  --preview
+# 从电影截图反向提取 LUT
+lut-generator extract movie_frame.jpg -o cinematic_lut.cube -s 65
 
-# 应用到你的素材
-lut-generator apply \
-  --input ./footage/ \
-  --lut cinematic_lut.cube \
-  --output ./graded/ \
-  --batch
+# 强度衰减
+lut-generator extract movie_frame.jpg -o cinematic_lut.cube -s 65 --strength 0.7
+
+# 直接生成调色后的图
+lut-generator transfer -i movie_frame.jpg -t footage/ -o graded/ 2>/dev/null \
+  || true   # transfer 不支持目录,用 Python 循环
 ```
 
 ### 场景 2：从视频提取调色风格 🎬
 
 ```bash
 # 从电影预告片提取整体风格
-lut-generator video-generate \
-  trailer.mp4 \
-  --sampling scene \
-  --output trailer_style.cube
+lut-generator video-extract trailer.mp4 -o trailer_style.cube --strategy scene
 
-# 将电影风格应用到你的 Vlog
-lut-generator video-generate \
-  movie_trailer.mp4 \
-  --target my_vlog.mp4 \
-  --output my_vlog_graded.cube
+# 把电影风格应用到你的 Vlog
+lut-generator video-generate movie_trailer.mp4 -t my_vlog.mp4 -o my_vlog_graded.cube
 ```
 
 ### 场景 3：品牌色彩统一
 
 ```bash
-# 从品牌视觉素材生成统一风格
-lut-generator extract \
-  --input ./brand_assets/ \
-  --output brand_lut.cube \
-  --preview
+# 单图风格提取
+lut-generator extract brand_photo.jpg -o brand_lut.cube -s 33 --analyze
 
-# 批量应用到所有内容
-lut-generator apply \
-  --input ./content/ \
-  --lut brand_lut.cube \
-  --output ./branded/ \
-  --parallel
+# 批量用 Python 跑
+# python -c "
+# from pathlib import Path
+# from lut_generator.core.style_extractor import StyleExtractor
+# extractor = StyleExtractor(grid_size=33)
+# for img in Path('brand_assets').glob('*.jpg'):
+#     extractor.generate_lut(image_path=str(img), output_path=f'luts/{img.stem}.cube')
+# "
 ```
 
 ---

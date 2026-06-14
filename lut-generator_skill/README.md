@@ -1,321 +1,160 @@
 # LUT Generator Skill - 使用文档
+# LUT Generator Skill - 使用文档
 
 **版本**: v1.0.0  
-**最后更新**: 2026-04-13
+**最后更新**: 2026-06-14
 
-本文档介绍如何在 OpenClaw 中使用 LUT Generator Skill。
+本文档介绍 LUT Generator 在 OpenClaw / Hermes Agent 中的调用方式。Skill 本身没有独立 Python 包装层,**实际调用走 CLI**(`lut-generator` 命令)。
 
 ---
 
 ## 快速开始
 
-### 1. 安装 Skill
+### 1. 安装服务器端
 
 ```bash
-# 在 OpenClaw 工作区中
-cd ~/.openclaw/workspace-assistent/projects/lut-generator
-
-# 安装服务器端依赖
 cd lut-generator_server
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate   # Linux/macOS
+# .venv\Scripts\activate    # Windows
 pip install -e .
 ```
 
-### 2. 在 OpenClaw 中调用
+### 2. 在 OpenClaw / Hermes 中调用
 
-```python
-# 在 OpenClaw 对话中
-从 lut_generator_skill 导入技能
+OpenClaw / Hermes 没有 `lut_generator_skill` 这个 importable Python 包。**所有 skill 实际行为都通过 `lut-generator` CLI 完成**。在对话中调起时,直接告诉 agent 你要做什么即可(它会执行 CLI)。
 
-# 分析图像生成 LUT
-分析图像生成 LUT(
-    图像路径="reference.jpg",
-    输出路径="output.cube",
-    LUT 尺寸=33
-)
-```
+| 用户意图 | 调用的 CLI |
+|---|---|
+| "分析 reference.jpg 风格,生成 33³ LUT" | `lut-generator extract reference.jpg -o style.cube -s 33` |
+| "把 A 的风格迁移到 B,输出 LUT" | `lut-generator generate -i A.jpg -t B.jpg -o style.cube -s 33` |
+| "用 A 的风格渲染 B" | `lut-generator transfer -i A.jpg -t B.jpg -o B_styled.jpg` |
+| "输出 photo.jpg 的色彩统计" | `lut-generator analyze photo.jpg -o stats.json` |
+| "从 trailer.mp4 提取风格" | `lut-generator video-extract trailer.mp4 -o trailer.cube --analyze` |
 
 ---
 
 ## 技能功能
 
-### 核心功能
+### 核心能力
 
-1. **图像分析生成 LUT**
-   - 从单张参考图像提取色彩风格
-   - 批量分析多张图像生成平均风格
-   - 支持 17³/33³/65³ 三种精度
-
-2. **LUT 应用**
-   - 将生成的 LUT 应用到图像
-   - 批量处理多张图像
-   - 支持多种插值方法
-
-3. **预览和报告**
-   - 生成对比预览图
-   - 色彩可视化（直方图、色域图）
-   - 交互式 HTML 报告
-
-4. **性能优化**
-   - LUT 缓存（10-20x 加速）
-   - 并行处理（3-6x 加速）
-   - 内存优化（分块处理）
+1. **单图风格提取** — 从一张已调色图片反向提取 17³ / 33³ / 65³ LUT
+2. **双图色彩迁移** — Reinhard 算法把 source 风格迁移到 target
+3. **视频 LUT** — 从单视频提取 / 视频→视频风格迁移,支持场景检测 + 智能帧采样
+4. **批量处理** — 暂未提供 CLI 子命令,需走 Python API
+5. **Python 编程** — 完整 Python 包,支持嵌入到自定义 pipeline
 
 ---
 
 ## 使用示例
 
-### 示例 1: 单图分析
+### 示例 1: 单图分析 → LUT
 
+```bash
+# 等价于: 让 agent 跑这条命令
+lut-generator extract photos/reference.jpg -o luts/my_style.cube -s 33
+```
+
+Python 等价写法(完整可控):
 ```python
-from lut_generator_skill import analyze_image_for_lut
-
-# 分析单张图像生成 LUT
-lut_path = analyze_image_for_lut(
-    image_path="photos/reference.jpg",
-    output_path="luts/my_style.cube",
-    lut_size=33,
-    smoothness=0.5
-)
-
-print(f"LUT 已生成：{lut_path}")
+from lut_generator.core.style_extractor import StyleExtractor
+extractor = StyleExtractor(grid_size=33, strength=1.0)
+result = extractor.generate_lut(image_path='photos/reference.jpg')
+# result 包含 features(warmth/saturation/contrast)和 LUT 数据
 ```
 
 ### 示例 2: 批量分析
 
-```python
-from lut_generator_skill import analyze_images_batch
+CLI 没有 `analyze` 的多图模式,Python 写:
 
-# 批量分析多张图像
+```python
+from pathlib import Path
+from lut_generator.core.style_extractor import StyleExtractor
+
+extractor = StyleExtractor(grid_size=33)
 image_paths = [
     "references/style1.jpg",
     "references/style2.jpg",
-    "references/style3.jpg"
+    "references/style3.jpg",
 ]
-
-lut_path = analyze_images_batch(
-    image_paths=image_paths,
-    output_path="luts/averaged_style.cube",
-    lut_size=33
-)
-
-print(f"平均风格 LUT 已生成：{lut_path}")
+for img_path in image_paths:
+    p = Path(img_path)
+    extractor.generate_lut(image_path=img_path, output_path=f"luts/{p.stem}.cube")
 ```
 
-### 示例 3: 应用 LUT
+### 示例 3: 应用 LUT 到图像
+
+CLI 没有 `apply` 子命令;**通过双图色彩迁移直接出图** 或 **Python 加载 .cube 后 apply**:
+
+```bash
+# 方案 A:双图迁移(同时生成 LUT + 应用)
+lut-generator generate -i reference.jpg -t photo.jpg -o style.cube \
+  -s 33 && lut-generator transfer -i reference.jpg -t photo.jpg -o photo_styled.jpg
+```
 
 ```python
-from lut_generator_skill import apply_lut_to_image
-
-# 应用 LUT 到单张图像
-result = apply_lut_to_image(
-    input_path="photos/original.jpg",
-    lut_path="luts/my_style.cube",
-    output_path="photos/styled.jpg",
-    interpolation="trilinear",
-    gamma=1.0
-)
-
-print(f"处理完成：{result['output_path']}")
-print(f"耗时：{result['processing_time']:.2f}秒")
+# 方案 B:加载已有 .cube 应用到图
+from lut_generator.lut.applier import LUTApplier
+applier = LUTApplier.from_lut_file('luts/my_style.cube')
+result = applier.apply_to_file('photos/original.jpg', 'photos/styled.jpg')
+print(f"处理完成:{result.success}, 输出:{result.output_path}")
 ```
 
 ### 示例 4: 批量应用 LUT
 
 ```python
-from lut_generator_skill import apply_lut_batch
+from lut_generator.lut.applier import LUTApplier
+from pathlib import Path
 
-# 批量应用 LUT
-input_images = [
-    "photos/img1.jpg",
-    "photos/img2.jpg",
-    "photos/img3.jpg"
-]
-
-results = apply_lut_batch(
-    input_paths=input_images,
-    lut_path="luts/my_style.cube",
-    output_dir="output/styled/",
-    num_workers=4  # 并行处理
-)
-
-print(f"处理完成：{len(results)} 张图像")
+applier = LUTApplier.from_lut_file('luts/my_style.cube', grid_size=33)
+inputs = list(Path('photos').glob('*.jpg'))
+results = applier.apply_batch([str(p) for p in inputs], output_dir='output/styled/')
+print(f"处理完成:{len(results)} 张图像")
 ```
 
-### 示例 5: 生成预览报告
+### 示例 5: 视频 LUT
 
-```python
-from lut_generator_skill import generate_preview_report
+```bash
+# 从电影预告片提取整体风格
+lut-generator video-extract trailer.mp4 -o trailer_style.cube -s 33 --analyze
 
-# 生成完整预览报告
-report_path = generate_preview_report(
-    reference_path="photos/reference.jpg",
-    target_path="photos/target.jpg",
-    input_path="photos/test.jpg",
-    output_dir="reports/",
-    include_slider=True,
-    include_histograms=True,
-    include_gamut=True
-)
-
-print(f"报告已生成：{report_path}")
+# 视频→视频 风格迁移
+lut-generator video-generate source.mp4 -t target.mp4 -o graded.cube \
+  --strategy scene --max-frames 50
 ```
 
-### 示例 6: 使用优化器
+### 示例 6: 色彩统计 / HTML 报告
 
-```python
-from lut_generator_skill import optimize_processing
+```bash
+# 色彩统计
+lut-generator analyze photos/reference.jpg -o stats.json --use-colour
 
-# 配置优化器
-optimizer_config = {
-    'cache_enabled': True,
-    'cache_size': 100,
-    'parallel_workers': 4,
-    'chunk_size_mb': 256,
-    'use_processes': True
-}
-
-# 处理图像
-results = optimize_processing(
-    input_images=["img1.jpg", "img2.jpg", "img3.jpg"],
-    lut_path="style.cube",
-    config=optimizer_config
-)
-
-# 查看性能统计
-stats = results['performance_stats']
-print(f"缓存命中：{stats['cache_hits']}")
-print(f"加速比：{stats['parallel_speedup']:.2f}x")
+# 完整 HTML 报告:暂无 CLI 子命令,用 Python:
+# python -c "
+# from lut_generator.utils.html_report import HTMLReportGenerator
+# gen = HTMLReportGenerator()
+# gen.generate_from_paths('photos/original.jpg', 'photos/styled.jpg', 'report.html')
+# "
 ```
 
 ---
 
-## API 参考
+## API 参考(以 `src/lut_generator/` 实际包为准)
 
-### analyze_image_for_lut
+| 模块 | 主要导出 |
+|---|---|
+| `lut_generator.lut.lut3d` | `LUT3DGenerator`, `LUT3DConfig` |
+| `lut_generator.lut.exporter` | `LUTExporter`(支持 cube/3dl/clf) |
+| `lut_generator.lut.applier` | `LUTApplier`, `ApplyConfig` |
+| `lut_generator.analysis.analyzer` | `ColorAnalyzer`, `analyze_image` |
+| `lut_generator.core.style_extractor` | `StyleExtractor` |
+| `lut_generator.core.reinhard` | `ReinhardColorTransfer` |
+| `lut_generator.video.frame_extractor` | `VideoFrameExtractor`, `ExtractorConfig` |
+| `lut_generator.video.analyzer` | `VideoColorAnalyzer` |
+| `lut_generator.utils.html_report` | `HTMLReportGenerator`, `ReportConfig` |
+| `lut_generator.utils.visualizer` | `ColorVisualizer` |
 
-分析单张图像生成 LUT。
-
-**参数**:
-- `image_path` (str): 参考图像路径
-- `output_path` (str): 输出 LUT 路径
-- `lut_size` (int, optional): LUT 尺寸 (17/33/65), 默认 33
-- `smoothness` (float, optional): 平滑度 (0.0-1.0), 默认 0.5
-- `color_space` (str, optional): 色彩空间 ('lab'/'rgb'), 默认 'lab'
-
-**返回**: `str` LUT 文件路径
-
-**示例**:
-```python
-lut_path = analyze_image_for_lut("ref.jpg", "output.cube")
-```
-
----
-
-### analyze_images_batch
-
-批量分析多张图像生成平均 LUT。
-
-**参数**:
-- `image_paths` (List[str]): 图像路径列表
-- `output_path` (str): 输出 LUT 路径
-- `lut_size` (int, optional): LUT 尺寸，默认 33
-- `weights` (List[float], optional): 权重列表
-
-**返回**: `str` LUT 文件路径
-
-**示例**:
-```python
-lut_path = analyze_images_batch(
-    ["ref1.jpg", "ref2.jpg", "ref3.jpg"],
-    "averaged.cube"
-)
-```
-
----
-
-### apply_lut_to_image
-
-应用 LUT 到图像。
-
-**参数**:
-- `input_path` (str): 输入图像路径
-- `lut_path` (str): LUT 文件路径
-- `output_path` (str): 输出图像路径
-- `interpolation` (str, optional): 插值方法，默认 'trilinear'
-- `gamma` (float, optional): Gamma 校正，默认 1.0
-- `clamp` (bool, optional): 限制输出范围，默认 True
-
-**返回**: `dict` 处理结果
-
-**返回数据**:
-```python
-{
-    'success': bool,
-    'output_path': str,
-    'processing_time': float,
-    'input_size': tuple,
-    'output_size': tuple
-}
-```
-
----
-
-### apply_lut_batch
-
-批量应用 LUT 到多张图像。
-
-**参数**:
-- `input_paths` (List[str]): 输入图像路径列表
-- `lut_path` (str): LUT 文件路径
-- `output_dir` (str): 输出目录
-- `num_workers` (int, optional): 并行 worker 数量
-- `extensions` (List[str], optional): 处理的文件扩展名
-
-**返回**: `List[dict]` 处理结果列表
-
----
-
-### generate_preview_report
-
-生成完整预览报告。
-
-**参数**:
-- `reference_path` (str): 参考图像路径
-- `target_path` (str): 目标图像路径
-- `input_path` (str): 输入图像路径
-- `output_dir` (str): 输出目录
-- `include_slider` (bool, optional): 包含滑块对比，默认 True
-- `include_histograms` (bool, optional): 包含直方图，默认 True
-- `include_gamut` (bool, optional): 包含色域图，默认 True
-- `theme` (str, optional): 主题 ('dark'/'light'), 默认 'dark'
-
-**返回**: `str` HTML 报告路径
-
----
-
-### optimize_processing
-
-使用优化器处理图像。
-
-**参数**:
-- `input_images` (List[str]): 输入图像列表
-- `lut_path` (str): LUT 文件路径
-- `config` (dict, optional): 优化器配置
-- `output_dir` (str, optional): 输出目录
-
-**返回**: `dict` 处理结果和性能统计
-
-**配置选项**:
-```python
-config = {
-    'cache_enabled': True,       # 启用缓存
-    'cache_size': 100,           # 缓存大小
-    'parallel_workers': 4,       # worker 数量
-    'chunk_size_mb': 256,        # 分块大小 (MB)
-    'use_processes': True,       # 使用多进程
-    'max_memory_mb': 2048        # 最大内存 (MB)
+> 旧版 README 列出的 `from lut_generator_skill import analyze_image_for_lut / apply_lut_to_image` 等函数**不是真实存在的接口**;`lut_generator_skill/` 目录下只有 `SKILL.md` + `README.md`,**没有 Python 包**。要编程接入请直接 import 上面这些 `lut_generator.*` 模块。
 }
 ```
 

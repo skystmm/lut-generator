@@ -3,9 +3,11 @@
 **版本**: v1.0.0  
 **项目 ID**: 【图片分析风格生成 LUT 工具_标准版_20260413153500】  
 **状态**: ✅ 生产就绪  
-**最后更新**: 2026-04-13
+**最后更新**: 2026-06-14
 
 基于图片分析自动生成 3D LUT (.cube 格式) 的专业工具。使用 Reinhard 色彩迁移算法和特征融合技术，从参考图片提取色彩特征，生成可用于视频/图像调色的标准 LUT 文件。
+
+> **CLI 入口**:`lut-generator` 命令由 `src/lut_generator/cli/main.py` 注册;`src/cli.py` 为已弃用的兼容 shim,新代码请直接使用 `lut_generator.cli.main`。本文档所有命令均以 `lut-generator` 形式给出,直接调用可用 `python -m lut_generator.cli.main <subcmd>`。
 
 ---
 
@@ -22,99 +24,109 @@ python -m venv .venv
 source .venv/bin/activate  # Linux/macOS
 # 或 .venv\Scripts\activate  # Windows
 
-# 安装依赖
+# 安装依赖(包含 .cube/.3dl/.clf 导出 + 视频 LUT)
 pip install -e .
 ```
 
 ### 基本使用
 
-#### 1. 命令行使用
+> **可用的 CLI 子命令**(以代码为准):`analyze` / `generate` / `transfer` / `extract` / `video-generate` / `video-extract`
+> 跑 `lut-generator --help` 查看完整列表与最新签名。
+
+#### 1. 单图提取风格 → LUT(`extract`,最常见的"参考图→LUT"流程)
 
 ```bash
-# 单图分析生成 LUT
-lut-generator analyze \
-  --input reference.jpg \
-  --output style_lut.cube \
-  --size 33
+# 基本:从已调色的图片反向提取 LUT
+lut-generator extract reference.jpg -o style_lut.cube -s 33
 
-# 多图批量分析
-lut-generator analyze \
-  --input ./references/ \
-  --output style_lut.cube \
-  --size 33 \
-  --batch
+# 调强度 + 输出风格分析 JSON
+lut-generator extract graded.jpg -o style.cube -s 33 \
+  --strength 0.7 --analyze
 
-# 生成预览对比图
-lut-generator analyze \
-  --input reference.jpg \
-  --output style_lut.cube \
-  --preview \
-  --preview-input test.jpg
-
-# 应用 LUT 到图像
-lut-generator apply \
-  --input image.jpg \
-  --lut style_lut.cube \
-  --output image_processed.jpg
-
-# 批量应用 LUT
-lut-generator apply \
-  --input ./images/ \
-  --lut style_lut.cube \
-  --output ./output/ \
-  --batch
-
-# 生成完整报告
-lut-generator report \
-  --reference reference.jpg \
-  --target target.jpg \
-  --input test.jpg \
-  --output ./report/
+# 自定义中性基线(用于还原 LUT 时的参考中性图)
+lut-generator extract graded.jpg -o style.cube -s 33 \
+  --baseline-image neutral.jpg
 ```
 
-#### 2. Python API
+#### 2. 双图色彩迁移 → LUT(`generate`,Reinhard 风格匹配)
+
+```bash
+# 把 source 的色彩风格迁移到 target,生成 LUT
+lut-generator generate -i source.jpg -t target.jpg -o style.cube -s 33
+
+# 指定标题/描述/格式
+lut-generator generate -i source.jpg -t target.jpg -o style.cube \
+  -s 65 --strength 0.8 --title "Cinematic Teal" --description "v1"
+```
+
+#### 3. 把色彩迁移直接应用到图片(`transfer`,不出 LUT)
+
+```bash
+lut-generator transfer -i source.jpg -t target.jpg -o styled.jpg --strength 0.8
+```
+
+#### 4. 单图色彩统计(`analyze`,只输出 JSON 统计,不出 LUT)
+
+```bash
+# 打印到 stdout
+lut-generator analyze photo.jpg
+
+# 写到 JSON
+lut-generator analyze photo.jpg -o stats.json
+
+# 强制使用 colour-science(更准,需要 scipy)
+lut-generator analyze photo.jpg --use-colour -o stats.json
+```
+
+> 旧的 README 写的是 `lut-generator analyze --input --output --size 33` —— 该用法**不存在**。`analyze` 只接受位置参数 `image` + `-o output.json`,没有 `--size`,没有 LUT 导出能力。要"分析并生成 LUT"请用 `extract` / `generate`。
+
+#### 5. 视频 LUT(`video-generate` / `video-extract`)
+
+```bash
+# 单视频反向提取 LUT
+lut-generator video-extract movie.mp4 -o movie_style.cube -s 33 --analyze
+
+# 视频→视频 风格迁移
+lut-generator video-generate source.mp4 -t target.mp4 -o graded.cube
+
+# 单源视频(只提取风格)
+lut-generator video-generate trailer.mp4 -o trailer_style.cube \
+  --sample-rate 1.0 --max-frames 100 --strategy scene
+```
+
+采样策略:`uniform` 均匀 / `scene` 场景分段 / `adaptive` 自适应。
+
+#### 6. Python API
 
 ```python
-from lut3d_generator import LUT3DGenerator, LUT3DConfig
-from lut_applier import LUTApplier
-from preview_generator import PreviewGenerator
-from visualizer import ColorVisualizer
-from html_report import HTMLReportGenerator
+# 真实存在的模块路径(以 src/lut_generator/ 为准)
+from lut_generator.lut.lut3d import LUT3DGenerator, LUT3DConfig
+from lut_generator.lut.exporter import LUTExporter
+from lut_generator.lut.applier import LUTApplier
+from lut_generator.analysis.analyzer import ColorAnalyzer, analyze_image
+from lut_generator.core.style_extractor import StyleExtractor
 
-# 1. 生成 LUT
+# 1) 单图提取风格(对应 CLI: lut-generator extract)
+extractor = StyleExtractor(grid_size=33, strength=1.0)
+result = extractor.generate_lut(image_path='graded_photo.jpg')
+# result.features.warmth / .saturation / .contrast
+
+# 2) 双图色彩迁移(对应 CLI: lut-generator generate)
 config = LUT3DConfig(grid_size=33, smoothness=0.5)
 generator = LUT3DGenerator(config)
-result = generator.generate_from_images('reference.jpg', 'target.jpg')
+lut_data = generator.generate_from_images('source.jpg', 'target.jpg', strength=0.8)
 
-# 2. 导出 LUT
-generator.export_to_cube('output_lut.cube')
+# 3) 导出 .cube / .3dl / .clf
+metadata = {'title': 'My Style', 'description': 'demo'}
+LUTExporter(lut_data, metadata).export('output.cube', format='cube')
 
-# 3. 应用 LUT
-applier = LUTApplier(generator)
-applier.apply_to_file('input.jpg', 'output.jpg')
-
-# 4. 生成预览
-preview_gen = PreviewGenerator(applier)
-preview_gen.generate_comparison(
-    'input.jpg',
-    'output.jpg',
-    'comparison.png',
-    mode='side_by_side'
-)
-
-# 5. 生成可视化
-visualizer = ColorVisualizer()
-visualizer.plot_histogram('input.jpg', 'histogram.png')
-visualizer.plot_gamut('input.jpg', 'gamut.png')
-
-# 6. 生成 HTML 报告
-report_gen = HTMLReportGenerator()
-report_gen.generate_from_paths(
-    'input.jpg',
-    'output.jpg',
-    'report.html'
-)
+# 4) 色彩统计(对应 CLI: lut-generator analyze)
+analyzer = ColorAnalyzer(use_colour=False)
+stats = analyzer.analyze(Path('photo.jpg'))
 ```
+
+> 旧的 README 列出的 `from lut3d_generator import ...` / `from lut_applier import ...` / `from preview_generator import ...` 等**根级模块导入路径均已弃用**,会触发 `DeprecationWarning` 并指向 shim;新代码请用上面 `lut_generator.*` 包路径。`html_report` / `visualizer` 已迁到 `lut_generator.utils.*`。
+
 
 ---
 
@@ -186,7 +198,7 @@ lut-generator_server/
 
 #### 1. 准备参考图像
 
-选择一张或多张具有目标色彩风格的图像作为参考。
+选择一张或两张具有目标色彩风格的图像作为参考。
 
 **建议**:
 - 图像质量高，色彩丰富
@@ -196,58 +208,42 @@ lut-generator_server/
 #### 2. 分析并生成 LUT
 
 ```bash
-# 单图分析
-lut-generator analyze \
-  --input reference.jpg \
-  --output my_style.cube \
-  --size 33
+# 单图反向提取风格(对应 `extract` 子命令)
+lut-generator extract reference.jpg -o my_style.cube -s 33
 
-# 多图分析（平均风格）
-lut-generator analyze \
-  --input ./references/ \
-  --output averaged_style.cube \
-  --size 33 \
-  --batch
+# 双图色彩迁移(对应 `generate` 子命令)
+lut-generator generate -i reference.jpg -t photo.jpg -o my_style.cube -s 33
 ```
 
-#### 3. 预览效果
+> "多图批量分析"没有直接的 CLI 子命令。要批量跑请用 Python API:
+> ```python
+> from pathlib import Path
+> from lut_generator.core.style_extractor import StyleExtractor
+> extractor = StyleExtractor(grid_size=33)
+> for img in Path('./references').glob('*.jpg'):
+>     extractor.generate_lut(image_path=str(img), output_path=f'./out_{img.stem}.cube')
+> ```
+
+#### 3. 应用 LUT 到图像
 
 ```bash
-# 生成预览对比图
-lut-generator analyze \
-  --input reference.jpg \
-  --output my_style.cube \
-  --preview \
-  --preview-input test.jpg \
-  --preview-output ./preview/
+# 用 transfer 把 source 风格直接迁移到 target
+lut-generator transfer -i source.jpg -t photo.jpg -o photo_styled.jpg --strength 0.8
 ```
 
-#### 4. 应用 LUT
+> `apply --lut ...` 不存在。要应用一个 **已生成的 .cube** 到图,请用 `transfer`(在生成 LUT 的同时也完成应用)或在 Python 里用 `LUTApplier` 加载 LUT 后再 apply。
+
+#### 4. 视频 LUT(可选)
 
 ```bash
-# 应用到单张图像
-lut-generator apply \
-  --input photo.jpg \
-  --lut my_style.cube \
-  --output photo_styled.jpg
-
-# 批量应用
-lut-generator apply \
-  --input ./photos/ \
-  --lut my_style.cube \
-  --output ./styled/ \
-  --batch
+lut-generator video-extract trailer.mp4 -o trailer_style.cube -s 33 --analyze
 ```
 
-#### 5. 生成报告
+#### 5. 色彩分析(可选)
 
 ```bash
-# 生成完整分析报告
-lut-generator report \
-  --reference reference.jpg \
-  --target target.jpg \
-  --input test.jpg \
-  --output ./report/
+# 只跑色彩统计,不出 LUT
+lut-generator analyze photo.jpg -o stats.json
 ```
 
 ### Python API 详解
