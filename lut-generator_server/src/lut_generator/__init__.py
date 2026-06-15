@@ -5,7 +5,7 @@ A professional tool for generating 3D LUTs (.cube format) from reference images
 using the Reinhard color transfer algorithm.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "RD Agent"
 
 from .core.color_space import ColorSpaceConverter

@@ -5,12 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> 项目当前在 `main` 分支,版本号 `0.2.0`(unreleased,见末尾)。
-> 历史 commit 是 2026-04 起由原 [skystmm/lut-generator](https://github.com/skystmm/lut-generator) 仓库累积。
+> 项目当前在 `main` 分支,版本号 `0.2.0`(2026-06-14,见下方)。
 
 ---
 
-## [Unreleased]
+## [0.2.0] - 2026-06-14
 
 ### Added
 - **相机 RAW 读取支持**: 新增 `lut_generator.utils.image_loader` 模块,通过 `rawpy` + LibRaw 支持 16+ RAW 后缀(DNG/ARW/CR2/CR3/NEF/NRW/RW2/RAF/ORF/PEF/DCR/KDC/MRW/SRW/X3F/3FR 等 600+ 机型)
