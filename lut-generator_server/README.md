@@ -65,7 +65,18 @@ lut-generator generate -i source.jpg -t target.jpg -o style.cube \
 lut-generator extract graded.jpg -o my_look.xmp -s 33 -f xmp
 lut-generator generate -i source.jpg -t target.jpg -o my_look.xmp -s 33 -f xmp \
   --title "My LR Preset" --strength 0.8
+
+# 导出为 Adobe Lightroom Classic 原生 .lrtemplate 预设 (推荐,带完整 3D LUT)
+# 比 .xmp 更强大:把 3D LUT 完整塞到 s.LUT3D,LrC 内部三线性插值,
+# 不会像 .xmp 的 1D 压缩那样丢 3D 维度信息
+lut-generator extract graded.jpg -o my_look.lrtemplate -s 33 -f lrtemplate
+lut-generator generate -i source.jpg -t target.jpg -o my_look.lrtemplate -s 33 -f lrtemplate \
+  --title "My LrC Preset" --strength 0.8
 ```
+
+> **XMP vs .lrtemplate 选哪个?**
+> - **XMP 预设** (`.xmp`): 走 Adobe 通用 XMP 路径,跨软件(LR/ACR/PS);但 `crs:ColorTable` 是 1D 压缩,3D 维度信息丢光,应用到照片几乎无变化
+> - **.lrtemplate 预设** (LrC 12/13/14 推荐): 走 LrC 原生 JSON preset,s.LUT3D 字段保留完整 3D LUT;导入后能真正看到色彩变化
 
 #### 3. 把色彩迁移直接应用到图片(`transfer`,不出 LUT)
 
@@ -140,7 +151,19 @@ LUTExporter(lut_data, metadata).export_xmp_preset(
 # 通用 dispatch 也支持:
 LUTExporter(lut_data, metadata).export('my_look.xmp', format='xmp')
 
-# 5) 色彩统计(对应 CLI: lut-generator analyze)
+# 5) 导出为 Adobe Lightroom Classic 原生 .lrtemplate 预设 (推荐,带完整 3D LUT)
+# (LUTExporter 把 3D LUT 完整序列化到 s.LUT3D 字段,BGR 顺序,16-bit 整数)
+LUTExporter(lut_data, metadata).export_lrtemplate_preset(
+    'my_look.lrtemplate',
+    title='My LrC Preset',       # s.Name
+    group='MyBrand:Looks',       # s.Group (LrC 分组)
+    apply_amount=1.0,            # 0-1,Amount 滑块初值
+    process_version='15.4',      # LrC 14 推荐
+)
+# 通用 dispatch 也支持:
+LUTExporter(lut_data, metadata).export('my_look.lrtemplate', format='lrtemplate')
+
+# 6) 色彩统计(对应 CLI: lut-generator analyze)
 analyzer = ColorAnalyzer(use_colour=False)
 stats = analyzer.analyze(Path('photo.jpg'))
 ```

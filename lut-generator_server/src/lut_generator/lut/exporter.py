@@ -7,6 +7,7 @@ LUT 导出模块 - LUTExporter
 - clf (ACES)
 """
 
+import json
 import numpy as np
 from typing import Union
 from pathlib import Path
@@ -231,6 +232,98 @@ class LUTExporter:
         except OSError as e:
             raise OSError(f"OS error while writing XMP preset to {filepath}: {e}") from e
 
+    def export_lrtemplate_preset(self,
+                                 filepath: Union[str, Path],
+                                 title: str = None,
+                                 group: str = 'lut-generator:UserPresets',
+                                 preset_type: str = 'Normal',
+                                 apply_amount: float = 1.0,
+                                 process_version: str = '15.4',
+                                 supports_amount: bool = True) -> None:
+        """
+        导出为 Adobe Lightroom Classic `.lrtemplate` 预设(JSON6 风格),
+        可被 LrC 12/13/14 通过 `Presets panel → + → Import Preset` 加载。
+
+        核心优势: 能把 **完整 3D LUT**(R×G×B×3) 塞进 LrC 内部,
+        跳过 XMP `crs:ColorTable` 的 1D 压缩问题(后者把 3D 信息丢光,
+        应用到照片几乎无变化)。
+
+        字段说明(基于 LrC 12-14 导出的实际 preset 字段集):
+        - `type=Develop` + `version=1`: 必备 schema 头
+        - `s.Name` / `s.Group` / `s.PresetType`: 元数据
+        - `s.ProcessVersion="15.4"`: LrC 14 推荐(CC 2020+)
+        - `s.SupportsAmount` / `s.Amount`: 0-1 强度
+        - `s.ToneCurveName2012="Linear"`: 占位,避免 LrC 强制要求曲线
+        - `s.LUT3D` / `s.LUT3DSize`: **核心** — 完整 3D LUT
+        - `s.LUT3DIntent=0` / `s.LUT3DMixing`: 渲染相关
+
+        `LUT3D` 字符串编码: N³ 个 RGB 三元组,每分量 16-bit (0-65535)
+        整数,空格分隔,顺序按 BGR(蓝变化最快,跟 `.cube` 文件一致)。
+
+        Args:
+            filepath: 输出 .lrtemplate 路径(无后缀自动补)
+            title: 预设名称
+            group: LrC 预设分组
+            preset_type: `Normal` / `Auto` / `Video`
+            apply_amount: 0.0-1.0,应用强度
+            process_version: `s.ProcessVersion`,LrC 14 用 15.4
+            supports_amount: 是否带 Amount 滑块
+        """
+        filepath = Path(filepath)
+        if filepath.suffix == '':
+            filepath = filepath.with_suffix('.lrtemplate')
+
+        title = title or self.metadata.get('title', 'LUT Preset')
+        # group 优先用 metadata 里的(允许调用方覆盖默认值)
+        group = self.metadata.get('group', group)
+
+        # 1) 量化 3D LUT 到 16-bit 整数
+        lut_clipped = np.clip(self.lut_data, 0.0, 1.0)
+        lut_int = np.round(lut_clipped * 65535).astype(np.uint32)
+
+        # 2) 展平成 BGR 顺序的 1D 字符串("r0 g0 b0 r1 g1 b1 ...")
+        #    BGR 顺序: 最外层 B 变化最快(跟 .cube 文件一致,
+        #    LrC 内部存储习惯)
+        #    原 lut_data 形状 (N, N, N, 3),索引 [r, g, b, k](k=通道)
+        #    要展平成 BGR 顺序,需要把 [b, g, r, k] 这个轴顺序
+        #    → 用 transpose(2, 1, 0, 3) 把 b 放到最外层
+        N = self.grid_size
+        lut_bgr = lut_int.transpose(2, 1, 0, 3)  # (N, N, N, 3) → 轴序 [b, g, r, k]
+        # 现在 C-order reshape: 按 [b, g, r, channel] 展平 = BGR 顺序 ✓
+        flat = lut_bgr.reshape(N * N * N, 3)
+        lut_str = ' '.join(
+            f"{flat[i, 0]:d} {flat[i, 1]:d} {flat[i, 2]:d}"
+            for i in range(N * N * N)
+        )
+
+        # 3) 拼 JSON6 兼容的 dict
+        preset = {
+            'type': 'Develop',
+            'version': 1,
+            's': {
+                'Name': title,
+                'Group': group,
+                'PresetType': preset_type,
+                'ProcessVersion': process_version,
+                'SupportsAmount': 1 if supports_amount else 0,
+                'Amount': float(apply_amount),
+                'ToneCurveName2012': 'Linear',
+                'LUT3DSize': N,
+                'LUT3D': lut_str,
+                'LUT3DIntent': 0,
+                'LUT3DMixing': 0.5,
+            }
+        }
+
+        # 4) 写文件(JSON 严格模式,LrC 也吃;JSON6 是其超集,标准 JSON 是其子集)
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(preset, f, indent=2, ensure_ascii=False)
+        except IOError as e:
+            raise IOError(f"Failed to write LRTEMPLATE preset to {filepath}: {e}") from e
+        except OSError as e:
+            raise OSError(f"OS error while writing LRTEMPLATE preset to {filepath}: {e}") from e
+
     def _lut_to_color_table(self) -> tuple:
         """
         沿主对角线 (i, i, i) 采样 3D LUT,得到 3 条 1D 256-entry 映射。
@@ -339,17 +432,18 @@ class LUTExporter:
 </x:xmpmeta>
 '''
 
-    def export(self, filepath: Union[str, Path], 
+    def export(self, filepath: Union[str, Path],
                format: str = 'cube',
                **kwargs) -> None:
         """
         通用导出方法
-        
+
         Args:
             filepath: 输出文件路径
-            format: 输出格式 ('cube', '3dl', 'clf', 'xmp')
+            format: 输出格式 ('cube', '3dl', 'clf', 'xmp', 'lrtemplate')
             **kwargs: 格式特定参数
                 - xmp: title / group / preset_type / apply_amount / process_version
+                - lrtemplate: 同 xmp
         """
         format = format.lower()
         
@@ -361,6 +455,8 @@ class LUTExporter:
             self.export_clf(filepath, **kwargs)
         elif format == 'xmp':
             self.export_xmp_preset(filepath, **kwargs)
+        elif format == 'lrtemplate':
+            self.export_lrtemplate_preset(filepath, **kwargs)
         else:
             raise ValueError(f"Unknown format: {format}")
 
