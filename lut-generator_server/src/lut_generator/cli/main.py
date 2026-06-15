@@ -57,7 +57,7 @@ def create_parser() -> argparse.ArgumentParser:
     gen_parser.add_argument('-o', '--output', type=str, required=True,
                             help='Output LUT file path')
     gen_parser.add_argument('-f', '--format', type=str, default='cube',
-                            choices=['cube', '3dl', 'clf', 'xmp', 'lrtemplate'],
+                            choices=['cube', '3dl', 'clf', 'xmp', 'lrtemplate', 'xmpcreative'],
                             help='Output format (default: cube)')
     gen_parser.add_argument('-s', '--size', type=int, default=33,
                             choices=[17, 33, 65],
@@ -196,7 +196,7 @@ def create_parser() -> argparse.ArgumentParser:
     extract_parser.add_argument('-o', '--output', type=str, required=True,
                                 help='Output LUT file path')
     extract_parser.add_argument('-f', '--format', type=str, default='cube',
-                                choices=['cube', '3dl', 'clf', 'xmp', 'lrtemplate'],
+                                choices=['cube', '3dl', 'clf', 'xmp', 'lrtemplate', 'xmpcreative'],
                                 help='Output format (default: cube)')
     extract_parser.add_argument('-s', '--size', type=int, default=33,
                                 choices=[17, 33, 65],
@@ -255,7 +255,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
     
     # 根据格式自动添加扩展名
     if output_path.suffix == '':
-        ext_map = {'cube': '.cube', '3dl': '.3dl', 'clf': '.clf', 'xmp': '.xmp', 'lrtemplate': '.lrtemplate'}
+        ext_map = {'cube': '.cube', '3dl': '.3dl', 'clf': '.clf', 'xmp': '.xmp', 'lrtemplate': '.lrtemplate', 'xmpcreative': '.xmp'}
         output_path = output_path.with_suffix(ext_map[args.format])
     
     exporter.export(output_path, format=args.format)
@@ -375,7 +375,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
     
     # 根据格式自动添加扩展名
     if output_path.suffix == '':
-        ext_map = {'cube': '.cube', '3dl': '.3dl', 'clf': '.clf', 'xmp': '.xmp', 'lrtemplate': '.lrtemplate'}
+        ext_map = {'cube': '.cube', '3dl': '.3dl', 'clf': '.clf', 'xmp': '.xmp', 'lrtemplate': '.lrtemplate', 'xmpcreative': '.xmp'}
         output_path = output_path.with_suffix(ext_map[args.format])
     
     exporter.export(output_path, format=args.format)
@@ -480,7 +480,7 @@ def cmd_video_generate(args: argparse.Namespace) -> int:
     exporter = LUTExporter(lut, metadata)
     
     if output_path.suffix == '':
-        ext_map = {'cube': '.cube', '3dl': '.3dl', 'clf': '.clf', 'xmp': '.xmp', 'lrtemplate': '.lrtemplate'}
+        ext_map = {'cube': '.cube', '3dl': '.3dl', 'clf': '.clf', 'xmp': '.xmp', 'lrtemplate': '.lrtemplate', 'xmpcreative': '.xmp'}
         output_path = output_path.with_suffix(ext_map[args.format])
     
     exporter.export(output_path, format=args.format)
@@ -561,7 +561,7 @@ def cmd_video_extract(args: argparse.Namespace) -> int:
     exporter = LUTExporter(lut, metadata)
     
     if output_path.suffix == '':
-        ext_map = {'cube': '.cube', '3dl': '.3dl', 'clf': '.clf', 'xmp': '.xmp', 'lrtemplate': '.lrtemplate'}
+        ext_map = {'cube': '.cube', '3dl': '.3dl', 'clf': '.clf', 'xmp': '.xmp', 'lrtemplate': '.lrtemplate', 'xmpcreative': '.xmp'}
         output_path = output_path.with_suffix(ext_map[args.format])
     
     exporter.export(output_path, format=args.format)

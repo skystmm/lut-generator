@@ -7,7 +7,9 @@ LUT 导出模块 - LUTExporter
 - clf (ACES)
 """
 
+import base64
 import json
+import zlib
 import numpy as np
 from typing import Union
 from pathlib import Path
@@ -324,6 +326,120 @@ class LUTExporter:
         except OSError as e:
             raise OSError(f"OS error while writing LRTEMPLATE preset to {filepath}: {e}") from e
 
+    def export_xmp_creative_profile(self,
+                                    filepath: Union[str, Path],
+                                    title: str = None,
+                                    group: str = 'lut-generator:UserPresets',
+                                    apply_amount: float = 1.0,
+                                    process_version: str = '15.4') -> None:
+        """
+        导出为 Adobe Lightroom Classic / ACR **Creative Profile** (.xmp),
+        这是 LrC 14 官方 3D LUT 路线(2018+ 取代 .lrtemplate)。
+
+        优势 vs .lrtemplate:
+        - .lrtemplate 是 LrC 7.3 之前的 legacy 格式, LrC 14 自动隐藏
+        - .xmp Creative Profile 是 LrC 14 官方 Profile Browser 加载路径
+        - 完整 3D LUT 通过 `crs:RGBTable` 字段内嵌,不丢维度
+
+        LUT 编码方式(基于 exiftool 论坛真实 .xmp 反推 + DNG spec 1.4):
+        1. 3D LUT 量化到 16-bit big-endian (0-65535)
+        2. 按 BGR 顺序展平(B 最外层,跟 .cube 一致)
+        3. **zlib 压缩**(level 9,最大压缩)
+        4. **Adobe Ascii85 编码**(PostScript Level 2)
+        5. 包裹成 `crs:Table_<md5>="<encoded>"` 字段
+        6. `crs:RGBTable="<md5>"` 引用
+
+        ⚠️ [EXPERIMENTAL] Adobe 的 asymmetric85 编码细节没公开,本实现
+           走标准 Ascii85 + zlib 路线。LrC 14 的 XMP parser 通常宽容
+           接受任何合法 Ascii85 编码;若不工作可微调编码方案。
+
+        Args:
+            filepath: 输出 .xmp 路径(无后缀自动补)
+            title: 预设名称
+            group: 在 LrC Profile Browser 中的分组
+            apply_amount: 0.0-1.0, 3D LUT 应用强度(写入 `crs:RGBTableAmount`)
+            process_version: `crs:ProcessVersion`,LrC 14 用 15.4
+
+        安装路径(让 LrC 发现):
+        - Mac: `/Library/Application Support/Adobe/CameraRaw/Settings/`
+        - Win: `C:\\ProgramData\\Adobe\\CameraRaw\\Settings\\`(需要管理员)
+        """
+        import hashlib
+        filepath = Path(filepath)
+        if filepath.suffix == '':
+            filepath = filepath.with_suffix('.xmp')
+
+        title = title or self.metadata.get('title', 'LUT Preset')
+        group = self.metadata.get('group', group)
+        title = self._xml_escape(title)
+        group = self._xml_escape(group)
+
+        # 1) 量化 3D LUT 到 16-bit big-endian
+        lut_clipped = np.clip(self.lut_data, 0.0, 1.0)
+        lut_int = np.round(lut_clipped * 65535).astype('>u2')  # big-endian uint16
+
+        # 2) 按 BGR 顺序展平(B 最外层,跟 .cube / LrC 约定一致)
+        N = self.grid_size
+        lut_bgr = lut_int.transpose(2, 1, 0, 3)  # axis 顺序 [b, g, r, channel]
+        flat = lut_bgr.reshape(N * N * N, 3)
+        data_bytes = flat.tobytes()
+
+        # 3) zlib 压缩(level 9,最大压缩)
+        compressed = zlib.compress(data_bytes, 9)
+
+        # 4) Adobe Ascii85 编码(用 <~ ~> wrapper 标准化,base64.a85decode 必须这样)
+        encoded_bytes = base64.a85encode(compressed, adobe=True)
+        encoded_str = encoded_bytes.decode('ascii')
+        # 5) XML-escape: Ascii85 输出含 < > & ' " 等 XML 特殊字符,
+        #    必须在写入 XML 字段前 escape
+        encoded_str_escaped = self._xml_escape(encoded_str)
+
+        # 6) 算 MD5 hash 作为表名引用(用未 escape 的字符串算,跟 LrC 实际数据格式一致)
+        md5_hash = hashlib.md5(encoded_str.encode('ascii')).hexdigest().upper()
+        table_field = f'crs:Table_{md5_hash}'
+
+        # 6) 拼 XMP(参照 exiftool 论坛 Boyd 帖真实 .xmp)
+        xmp = f'''<?xml version="1.0" encoding="UTF-8"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="lut-generator 1.0">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+    crs:PresetType="Look"
+    crs:Cluster="{group}"
+    crs:UUID="{md5_hash}"
+    crs:SupportsAmount="True"
+    crs:SupportsColor="True"
+    crs:SupportsMonochrome="False"
+    crs:SupportsHighDynamicRange="True"
+    crs:SupportsNormalDynamicRange="True"
+    crs:SupportsSceneReferred="True"
+    crs:SupportsOutputReferred="True"
+    crs:Version="15.4"
+    crs:ProcessVersion="{process_version}"
+    crs:ConvertToGrayscale="False"
+    crs:RGBTable="{md5_hash}"
+    {table_field}="{encoded_str_escaped}"
+    crs:RGBTableAmount="{apply_amount:.4f}"
+    crs:HasSettings="True">
+   <crs:Name>
+    <rdf:Alt><rdf:li xml:lang="x-default">{title}</rdf:li></rdf:Alt>
+   </crs:Name>
+   <crs:Group>
+    <rdf:Alt><rdf:li xml:lang="x-default">{group}</rdf:li></rdf:Alt>
+   </crs:Group>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
+'''
+
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(xmp)
+        except IOError as e:
+            raise IOError(f"Failed to write XMP Creative Profile to {filepath}: {e}") from e
+        except OSError as e:
+            raise OSError(f"OS error while writing XMP Creative Profile to {filepath}: {e}") from e
+
     def _lut_to_color_table(self) -> tuple:
         """
         沿主对角线 (i, i, i) 采样 3D LUT,得到 3 条 1D 256-entry 映射。
@@ -440,10 +556,12 @@ class LUTExporter:
 
         Args:
             filepath: 输出文件路径
-            format: 输出格式 ('cube', '3dl', 'clf', 'xmp', 'lrtemplate')
+            format: 输出格式 ('cube', '3dl', 'clf', 'xmp', 'lrtemplate', 'xmpcreative')
             **kwargs: 格式特定参数
                 - xmp: title / group / preset_type / apply_amount / process_version
                 - lrtemplate: 同 xmp
+                - xmpcreative: title / group / apply_amount / process_version
+                  (LrC 14 官方 3D LUT Creative Profile 路线)
         """
         format = format.lower()
         
@@ -457,6 +575,8 @@ class LUTExporter:
             self.export_xmp_preset(filepath, **kwargs)
         elif format == 'lrtemplate':
             self.export_lrtemplate_preset(filepath, **kwargs)
+        elif format == 'xmpcreative':
+            self.export_xmp_creative_profile(filepath, **kwargs)
         else:
             raise ValueError(f"Unknown format: {format}")
 
