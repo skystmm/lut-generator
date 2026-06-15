@@ -13,16 +13,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **`.lrtemplate` 预设导出**(LrC 12/13/14 原生推荐): `LUTExporter.export_lrtemplate_preset()` + CLI `-f lrtemplate`
-  - 把 3D LUT 完整序列化到 LrC 原生 JSON6 预设的 `s.LUT3D` 字段,保留 3D 维度信息(不沿对角线 1D 压缩)
-  - 字段集: `type=Develop` / `version=1` / `s.Name` / `s.Group` / `s.PresetType` / `s.ProcessVersion=15.4` / `s.SupportsAmount` / `s.Amount` / `s.ToneCurveName2012=Linear` / `s.LUT3D` / `s.LUT3DSize` / `s.LUT3DIntent=0` / `s.LUT3DMixing=0.5`
-  - `LUT3D` 字符串: N³ 个 RGB 三元组 × 16-bit (0-65535) 整数,空格分隔,顺序按 BGR(蓝变化最快,跟 `.cube` 文件一致)
-  - 13 个新测试 (`test_lrtemplate_exporter.py`): 覆盖 17³/33³/65³、字段齐备性、BGR 顺序、clipping、auto-suffix、dispatch、回归(cube/3dl/clf/xmp/lrtemplate 5 个格式)
+- **`.xmp` Creative Profile 导出**(LrC 14 **官方 3D LUT 路线**,推荐): `LUTExporter.export_xmp_creative_profile()` + CLI `-f xmpcreative`
+  - 通过 `crs:RGBTable` 字段内嵌完整 3D LUT(BGR 顺序,16-bit big-endian,zlib 压缩,Ascii85 编码)
+  - 安装路径:
+    - **Windows**: `C:\ProgramData\Adobe\CameraRaw\Settings\`
+    - **Mac**: `/Library/Application Support/Adobe/CameraRaw/Settings/`
+  - 重启 LrC 14 → Develop → Profile Browser → 找"lut-generator"分组应用
+  - 33 个新测试 (`test_xmpcreative_exporter.py`): 覆盖 5³/17³/33³/65³、必备字段、XML 解析、round-trip 解码验证、压缩比、Ascii85 字符集、MD5 一致性、auto-suffix、回归(5 个旧格式)
+  - ⚠️ `[EXPERIMENTAL]` Adobe 私有 `asymmetric85` 编码细节未公开,本实现走标准 Ascii85 + zlib;LrC 14 通常宽容接受,若加载不成功可调
+
+- **`.lrtemplate` 预设导出**(LrC 7.3 之前路线,**已弃用 fallback**): `LUTExporter.export_lrtemplate_preset()` + CLI `-f lrtemplate`
+  - 走 LrC 旧 JSON preset;**实测不带 `LUT3D` 字段**,仅 100+ 个 per-channel 调色参数
+  - LrC 14 自动隐藏并转 .xmp,仅兼容老 LrC 用户
+  - 13 个新测试 (`test_lrtemplate_exporter.py`): 覆盖 17³/33³/65³、字段齐备性、JSON 合法、auto-suffix、dispatch、回归
 
 ### Fixed
 - **静默 `colour-science` 启动时的 `ColourUsageWarning`**: 之前 CLI 启动会污染性输出 2 行 `"Matplotlib" / "SciPy" related API features are not available`(实际上 `colour-science 0.4.7` 已不硬依赖这两个,警告属软提示,不影响功能)。`src/lut_generator/__init__.py` 顶部加 `warnings.filterwarnings('ignore', category=Warning, module=r'colour\.utilities\.verbose')`,2 行内静默。**踩坑**:`ColourUsageWarning` 直接继承 `Warning`(**不**是 `UserWarning`),所以 `category=UserWarning` 匹配不到,必须用 `category=Warning`。
 
-> **附:XMP `crs:ColorTable` 编码** 经验证仍为 **16-bit (0-65535)**,与 Adobe LrC/ACR 创意预设规范一致。之前误判为"LrC 14 静默丢弃 16-bit ColorTable"已撤回(`220f558` 等被 force-replaced)。"导入 XMP 后照片无变化"更多是对角线 1D 压缩本身丢失 LUT 维度信息导致 — **本 release 引入 `.lrtemplate` 路线** 解决此问题,把完整 3D LUT 通过 `s.LUT3D` 字段塞进 LrC,不会丢维度。推荐所有 LrC 14 用户使用 `.lrtemplate` 而非 `.xmp`。
+### Documentation
+- **`XMP_LRTEMPLATE_RESEARCH.md`** — 完整的 LrC 14 preset 格式调研报告(17.7 KB),含:
+  - `.lrtemplate` 真实字段集(从 GitHub `NightFactory.lrtemplate` 反推)
+  - `.xmp` Creative Profile 真实结构(从 exiftool 论坛 Boyd 2020 帖反推)
+  - DNG spec 1.4 PDF 中 `ProfileLookTableDims` / `ProfileLookTableData` / `ProfileLookTableEncoding` / `ProfileToneCurve` 字段定义
+  - LrC 7.3 (2018-04) 弃用 .lrtemplate 时间线
+  - 27 个分类链接(Adobe 官方文档、exiftool 论坛、Adobe 社区、mattk.com、jasonodell、lrjson、dcptool 等)
+  - 推荐路线:`xmpcreative`(.xmp Creative Profile, LrC 14 官方 3D LUT 路径)
+
+### Misdiagnosis Withdrawn
+- **`crs:ColorTable` 8-bit 误诊撤回**(从历史 `220f558` force-replaced): 实际 `crs:ColorTable` 是 16-bit(0-65535),LrC 14 不消费作为 3D LUT,仅作 1D tone curve。**`.xmp` preset 路线本质是 1D 表达,无法保留 3D LUT**。真正 3D 路线是 `.xmp` Creative Profile(`crs:RGBTable`)。
+- **`.lrtemplate` 推荐宣传撤回**(从 `d27b599` 注释撤回): 真实 LrC 导出的 `.lrtemplate` **没有** `LUT3D` 字段;LrC 7.3 起弃用,LrC 14 自动隐藏。**`.lrtemplate` 不能装 3D LUT**。
 
 ---
 

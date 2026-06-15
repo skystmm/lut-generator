@@ -61,22 +61,43 @@ lut-generator generate -i source.jpg -t target.jpg -o style.cube \
   -s 65 --strength 0.8 --title "Cinematic Teal" --description "v1"
 
 # 导出为 Adobe Lightroom / Photoshop 兼容的 XMP 预设
-# (把 3D LUT 沿对角线降维成 crs:ColorTable,LR/ACR/PS 都能直接加载)
+# (把 3D LUT 沿对角线降维成 crs:ColorTable,LR/ACR/PS 都能直接加载;
+#  但 1D 压缩会丢 3D 维度信息,应用到照片几乎无色彩变化 — 实验性)
 lut-generator extract graded.jpg -o my_look.xmp -s 33 -f xmp
 lut-generator generate -i source.jpg -t target.jpg -o my_look.xmp -s 33 -f xmp \
   --title "My LR Preset" --strength 0.8
 
-# 导出为 Adobe Lightroom Classic 原生 .lrtemplate 预设 (推荐,带完整 3D LUT)
-# 比 .xmp 更强大:把 3D LUT 完整塞到 s.LUT3D,LrC 内部三线性插值,
-# 不会像 .xmp 的 1D 压缩那样丢 3D 维度信息
+# 导出为 Adobe Lightroom Classic **Creative Profile** .xmp (LrC 14 官方 3D LUT 路线,推荐)
+# 完整 3D LUT 通过 crs:RGBTable 字段内嵌 (zlib + Ascii85 编码),不丢维度
+lut-generator extract graded.jpg -o my_look.xmp -s 33 -f xmpcreative \
+  --title "My Creative Look"
+lut-generator generate -i source.jpg -t target.jpg -o my_look.xmp -s 33 -f xmpcreative \
+  --title "Cinematic Teal" --strength 0.8
+
+# 导出为 .lrtemplate 旧 preset 格式 (LrC 7.3 之前路线,LrC 14 已弃用)
+# 仅兼容老 LrC 用户。LrC 14 加载 .lrtemplate 会自动转 .xmp 并可能忽略 LUT 字段
 lut-generator extract graded.jpg -o my_look.lrtemplate -s 33 -f lrtemplate
-lut-generator generate -i source.jpg -t target.jpg -o my_look.lrtemplate -s 33 -f lrtemplate \
-  --title "My LrC Preset" --strength 0.8
 ```
 
-> **XMP vs .lrtemplate 选哪个?**
-> - **XMP 预设** (`.xmp`): 走 Adobe 通用 XMP 路径,跨软件(LR/ACR/PS);但 `crs:ColorTable` 是 1D 压缩,3D 维度信息丢光,应用到照片几乎无变化
-> - **.lrtemplate 预设** (LrC 12/13/14 推荐): 走 LrC 原生 JSON preset,s.LUT3D 字段保留完整 3D LUT;导入后能真正看到色彩变化
+> **xmpcreative vs xmp vs lrtemplate 选哪个?**
+> - **`xmpcreative`** (LrC 14 推荐): 走 Creative Profile 路径,完整 3D LUT 通过 `crs:RGBTable` 内嵌;需要安装到 `CameraRaw/Settings/` 目录,LrC Profile Browser 加载。**唯一保留 3D 维度信息的 LrC 路线**。
+> - **`xmp`** (通用, 1D 压缩): 走通用 XMP preset 路径,`crs:ColorTable` 沿对角线 1D 压缩;**3D 维度信息丢光,实验性**。
+> - **`.lrtemplate`** (LrC 7.3 前,已弃用): 走 LrC 旧 JSON preset,无 LUT3D 字段;LrC 14 自动隐藏并转换。
+
+#### 2.1 LrC Creative Profile (xmpcreative) 安装
+
+`xmpcreative` 生成的 .xmp 不是普通的 LrC Preset,而是 **Adobe Camera Raw Creative Profile**,需要放到特定目录 LrC/ACR 才能发现:
+
+| 平台 | 安装路径 |
+|---|---|
+| **Windows** | `C:\ProgramData\Adobe\CameraRaw\Settings\`(需管理员) |
+| **Mac** | `/Library/Application Support/Adobe/CameraRaw/Settings/` |
+
+或 LrC → `Edit` → `Preferences` → `Presets` → `Show All Other Lightroom Presets` 打开此目录。
+
+装好后**重启 LrC 14**,Develop 模块 → Profile Browser → 找到"lut-generator"分组 → 选择 Profile 应用,照片上能看见完整 3D 色彩变化。
+
+> ⚠️ `[EXPERIMENTAL]` Adobe 的 RGBTable 私有编码细节(asymmetric85 + 压缩算法)未公开;本实现走标准 Ascii85 + zlib 路线。LrC 14 的 XMP parser 通常宽容接受,但若加载不成功可能是编码细节差异,反馈后可调。
 
 #### 3. 把色彩迁移直接应用到图片(`transfer`,不出 LUT)
 
@@ -162,6 +183,18 @@ LUTExporter(lut_data, metadata).export_lrtemplate_preset(
 )
 # 通用 dispatch 也支持:
 LUTExporter(lut_data, metadata).export('my_look.lrtemplate', format='lrtemplate')
+
+# 6) 导出为 Adobe Lightroom Classic Creative Profile .xmp (LrC 14 官方 3D LUT 路线,推荐)
+# (LUTExporter 把 3D LUT 通过 zlib 压缩 + Ascii85 编码内嵌到 crs:Table_<md5> 字段)
+LUTExporter(lut_data, metadata).export_xmp_creative_profile(
+    'my_look.xmp',
+    title='My Creative Look',    # 在 LrC Profile Browser 中显示
+    group='MyBrand:Looks',       # 分组
+    apply_amount=1.0,            # 0-1,默认强度
+    process_version='15.4',      # LrC 14
+)
+# 通用 dispatch 也支持:
+LUTExporter(lut_data, metadata).export('my_look.xmp', format='xmpcreative')
 
 # 6) 色彩统计(对应 CLI: lut-generator analyze)
 analyzer = ColorAnalyzer(use_colour=False)
