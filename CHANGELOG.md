@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 > 项目当前在 `main` 分支,版本号 `0.2.0`(2026-06-14,见下方)。
+> 下面 `[Unreleased]` 段记录 1 个已 commit 在 main 但**未发 tag** 的小修复;测试通过后会升 `0.2.1` tag。
+
+---
+
+## [Unreleased]
+
+### Fixed
+- **静默 `colour-science` 启动时的 `ColourUsageWarning`**: 之前 CLI 启动会污染性输出 2 行 `"Matplotlib" / "SciPy" related API features are not available`(实际上 `colour-science 0.4.7` 已不硬依赖这两个,警告属软提示,不影响功能)。`src/lut_generator/__init__.py` 顶部加 `warnings.filterwarnings('ignore', category=Warning, module=r'colour\.utilities\.verbose')`,2 行内静默。**踩坑**:`ColourUsageWarning` 直接继承 `Warning`(**不**是 `UserWarning`),所以 `category=UserWarning` 匹配不到,必须用 `category=Warning`。
+
+> **附:XMP `crs:ColorTable` 编码** 经验证仍为 **16-bit (0-65535)**,与 Adobe LrC/ACR 创意预设规范一致。之前误判为"LrC 14 静默丢弃 16-bit ColorTable"已撤回(`220f558` 等被 force-replaced)。"导入 XMP 后照片无变化"更多是对角线 1D 压缩本身丢失 LUT 维度信息导致,改用 `.cube` + LrC 用户 LUT 目录可保留完整 3D 信息 — 详见 Roadmap 章节。
 
 ---
 
