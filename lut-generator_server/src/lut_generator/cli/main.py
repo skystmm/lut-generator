@@ -12,6 +12,7 @@ from typing import Optional
 
 from lut_generator.core.reinhard import ReinhardColorTransfer, TransferConfig
 from lut_generator.core.style_extractor import StyleExtractor, NeutralBaseline, extract_style, analyze_style
+from lut_generator.core.hald_extractor import HALDPixelExtractor, HALDExtractionConfig, extract_hald
 from lut_generator.lut.lut3d import LUT3DGenerator, LUT3DConfig
 from lut_generator.lut.exporter import LUTExporter
 from lut_generator.analysis.analyzer import ColorAnalyzer
@@ -211,7 +212,36 @@ def create_parser() -> argparse.ArgumentParser:
                                 help='Output style analysis JSON alongside LUT')
     extract_parser.add_argument('--baseline-image', type=str, default=None,
                                 help='Custom neutral baseline reference image')
-    
+
+    # extract-hald 子命令 - HALD-based 像素映射 3D LUT 提取(路线 A)
+    extract_hald_parser = subparsers.add_parser(
+        'extract-hald',
+        help='Extract 3D LUT from a single reference image using HALD-based pixel mapping (true 3D LUT, fixes "no color change" issue)',
+    )
+    _add_raw_flags(extract_hald_parser)
+    extract_hald_parser.add_argument('image', type=str,
+                                     help='Graded reference image path')
+    extract_hald_parser.add_argument('-o', '--output', type=str, required=True,
+                                     help='Output .cube file path')
+    extract_hald_parser.add_argument('-s', '--size', type=int, default=33,
+                                     choices=[8, 17, 25, 33, 64, 65],
+                                     help='LUT grid size (default: 33)')
+    extract_hald_parser.add_argument('-m', '--method', type=str, default='gaussian_rbf',
+                                     choices=['nearest', 'gaussian_rbf', 'shepard_idw'],
+                                     help='Extraction algorithm (default: gaussian_rbf)')
+    extract_hald_parser.add_argument('--rbf-sigma', type=float, default=0.05,
+                                     help='Gaussian RBF bandwidth (default: 0.05)')
+    extract_hald_parser.add_argument('--idw-power', type=float, default=2.0,
+                                     help='Shepard IDW power (default: 2.0)')
+    extract_hald_parser.add_argument('--smoothing', type=int, default=1,
+                                     help='3D box smoothing passes (default: 1, 0=disable)')
+    extract_hald_parser.add_argument('--n-samples', type=int, default=10000,
+                                     help='Random sample size for RBF/IDW (default: 10000)')
+    extract_hald_parser.add_argument('--seed', type=int, default=42,
+                                     help='Random seed (default: 42)')
+    extract_hald_parser.add_argument('--title', type=str, default=None,
+                                     help='LUT title (default: source filename)')
+
     return parser
 
 
@@ -325,10 +355,78 @@ def cmd_transfer(args: argparse.Namespace) -> int:
     rgb_uint8 = result.to_rgb_uint8()
     rgb_bgr = cv2.cvtColor(rgb_uint8, cv2.COLOR_RGB2BGR)
     cv2.imwrite(str(output_path), rgb_bgr)
-    
+
     print(f"Transfer result saved to: {output_path}")
-    
+
     return 0
+
+
+def cmd_extract_hald(args: argparse.Namespace) -> int:
+    """执行 extract-hald 命令 - HALD-based 单图像素映射 3D LUT 提取
+
+    与 cmd_extract (StyleExtractor, 1D 对角线) 不同:
+    - 用真正的像素映射算法生成 3D LUT
+    - 解决"LrC/PS 应用 LUT 后无色彩变化"问题(对角线 1D 压缩的根因)
+    - 3 种算法:nearest / gaussian_rbf (推荐) / shepard_idw
+    """
+    image_path = Path(args.image)
+    output_path = Path(args.output)
+
+    if not image_path.exists():
+        print(f"Error: Image not found: {image_path}")
+        return 1
+
+    print(f"HALD-based 3D LUT extraction: {image_path.name}")
+    print(f"  Method:    {args.method}")
+    print(f"  Cube size: {args.size}³ = {args.size ** 3:,} entries")
+    if args.method == "gaussian_rbf":
+        print(f"  RBF sigma: {args.rbf_sigma}")
+    elif args.method == "shepard_idw":
+        print(f"  IDW power: {args.idw_power}")
+    print(f"  Smoothing: {args.smoothing} passes")
+    if args.raw_mode != "none":
+        print(f"  RAW mode:  {args.raw_mode}, camera WB: {args.raw_wb}")
+
+    try:
+        # ColorSpaceConverter 自动处理 RAW(由 raw_mode / raw_wb 参数)
+        cfg = HALDExtractionConfig(
+            cube_size=args.size,
+            method=args.method,
+            rbf_sigma=args.rbf_sigma,
+            idw_power=args.idw_power,
+            smoothing_passes=args.smoothing,
+            n_samples=args.n_samples,
+            seed=args.seed,
+        )
+        extractor = HALDPixelExtractor(cfg)
+        result = extractor.extract(
+            image_path,
+            raw_mode=args.raw_mode,
+            use_camera_wb=args.raw_wb,
+        )
+
+        # 写 .cube(直接复用 extract_hald 便捷函数包装 LUTExporter)
+        extract_hald(
+            image_path,
+            output_path,
+            cube_size=args.size,
+            method=args.method,
+            smoothing_passes=args.smoothing,
+            title=args.title,
+        )
+
+        print(f"\n✓ Extracted 3D LUT → {output_path}")
+        print(f"  Shape:        {result.lut_data.shape}")
+        print(f"  Value range:  [{result.lut_data.min():.3f}, {result.lut_data.max():.3f}]")
+        print(f"  Time:         {result.extraction_time_sec:.2f}s")
+        print(f"  Source stats: mean RGB = {[f'{v:.2f}' for v in result.source_stats['mean_rgb']]}")
+        return 0
+
+    except Exception as e:
+        print(f"Error during extraction: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
 
 
 def cmd_extract(args: argparse.Namespace) -> int:
@@ -605,6 +703,7 @@ def cli(args: Optional[list] = None) -> int:
         'analyze': cmd_analyze,
         'transfer': cmd_transfer,
         'extract': cmd_extract,
+        'extract-hald': cmd_extract_hald,
         'video-generate': cmd_video_generate,
         'video-extract': cmd_video_extract,
     }

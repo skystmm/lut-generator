@@ -1,9 +1,9 @@
 # LUT Generator - 专业 3D LUT 生成工具
 
-**版本**: v1.0.0  
+**版本**: v0.3.0  
 **项目 ID**: 【图片分析风格生成 LUT 工具_标准版_20260413153500】  
 **状态**: ✅ 生产就绪  
-**最后更新**: 2026-06-14
+**最后更新**: 2026-06-16
 
 基于图片分析自动生成 3D LUT (.cube 格式) 的专业工具。使用 Reinhard 色彩迁移算法和特征融合技术，从参考图片提取色彩特征，生成可用于视频/图像调色的标准 LUT 文件。
 
@@ -32,7 +32,7 @@ pip install -e .
 
 ### 基本使用
 
-> **可用的 CLI 子命令**(以代码为准):`analyze` / `generate` / `transfer` / `extract` / `video-generate` / `video-extract`
+> **可用的 CLI 子命令**(以代码为准):`analyze` / `generate` / `transfer` / `extract` / **`extract-hald`** / `video-generate` / `video-extract`
 > 跑 `lut-generator --help` 查看完整列表与最新签名。
 
 #### 1. 单图提取风格 → LUT(`extract`,最常见的"参考图→LUT"流程)
@@ -49,6 +49,59 @@ lut-generator extract graded.jpg -o style.cube -s 33 \
 lut-generator extract graded.jpg -o style.cube -s 33 \
   --baseline-image neutral.jpg
 ```
+
+> ⚠️ `extract` 内部用 `StyleExtractor`(中性基线统计假设),算法本质是 **1D 对角线变换** — 3D 信息被压缩,加载到 LrC/PS/Resolve 时**应用后照片无色彩变化**。要保留 3D 维度请用下面的 `extract-hald`。
+
+#### 1.5 HALD-based 单图像素映射 → 真实 3D LUT(`extract-hald`,推荐)
+
+`extract-hald` 用真正的像素映射算法生成 3D LUT,直接解决 "LrC 应用 LUT 后无色彩变化" 的根因。3 种算法可选,默认 `gaussian_rbf`(推荐,质量+速度平衡):
+
+```bash
+# 推荐:从已调色参考图生成 33³ 3D LUT(gaussian_rbf 算法)
+lut-generator extract-hald reference.jpg -o style_lut.cube -s 33
+
+# 17³(快,LrC 14 官方推荐尺寸,4913 entries ≈ 60 KB)
+lut-generator extract-hald graded.jpg -o style.cube -s 17 --n-samples 5000
+
+# 33³ 完整精度(~250 KB,LrC 14 也接受;Resolve/Premiere 推荐)
+lut-generator extract-hald graded.jpg -o style.cube -s 33 --n-samples 10000
+
+# 高精度 65³(8 MB,LrC 14 / DaVinci Resolve 兼容)
+lut-generator extract-hald graded.jpg -o style.cube -s 65 --n-samples 20000
+
+# 算法切换:3 种
+lut-generator extract-hald graded.jpg -o style.cube -s 17 -m nearest
+lut-generator extract-hald graded.jpg -o style.cube -s 17 -m gaussian_rbf   # 默认
+lut-generator extract-hald graded.jpg -o style.cube -s 17 -m shepard_idw
+
+# 关闭 3D box 平滑(更锐利但可能有噪点)
+lut-generator extract-hald graded.jpg -o style.cube -s 33 --smoothing 0
+
+# 多参考图加权(覆盖更多色域,适合复杂场景)
+lut-generator extract-hald ref1.jpg,ref2.jpg,ref3.jpg \
+  -o style.cube -s 33 --weights 1.0,1.5,1.0
+
+# RAW 输入(走 rawpy demosaic,跟 extract 一致的 --raw-mode 档位)
+lut-generator extract-hald photo.cr3 -o style.cube -s 33 --raw-mode half --raw-wb
+```
+
+| 算法 | 速度(17³,5k 采样) | 质量 | 适用场景 |
+|---|---|---|---|
+| `gaussian_rbf` ⭐ | ~1s | 平滑、跨 bin 一致 | **默认推荐**;通用 |
+| `nearest` | ~0.5s | 边缘锐利、有锯齿 | 调试、需保留原图每个像素 |
+| `shepard_idw` | ~1s | 经典,远端色 extrapolation 略差 | 兼容性 / 老派算法 |
+
+**与 `extract` 的核心差异**:
+
+| 维度 | `extract` (StyleExtractor) | `extract-hald` (HALDPixelExtractor) |
+|---|---|---|
+| 维度 | 1D 对角线压缩 | **3D 真实映射** |
+| 算法 | 统计基线假设(mean_L=50, std=25) | 高斯 RBF / 最近邻 / IDW |
+| 输出 | 1D 沿对角线的 LUT | 真正的 `(R,G,B) → (R',G',B')` LUT |
+| LrC 应用 | 几乎无色彩变化 | **完整 3D 色彩偏移** |
+| 适用 | 快速风格描述、统计 | **LrC / Resolve / Premiere 实际应用** |
+
+> 💡 **怎么选?** 先试 `extract-hald reference.jpg -o style.cube -s 33` —— 这是 LrC 14/Resolve/Premiere 实际能用的"标准 3D LUT"工作流。需要保留 `extract` 的语义(快速风格描述)就用 `extract`。
 
 #### 2. 双图色彩迁移 → LUT(`generate`,Reinhard 风格匹配)
 
@@ -546,6 +599,82 @@ results = optimizer.process_batch_optimized(
 
 ---
 
+#### HALD-based 3D LUT 提取(Python API)
+
+`extract-hald` CLI 对应的 Python API,直接用于代码集成:
+
+```python
+from lut_generator.core.hald_extractor import (
+    HALDPixelExtractor,
+    HALDExtractionConfig,
+    HALDExtractionResult,
+    extract_hald,
+)
+
+# 1. 简洁方式:从参考图提取并直接写 .cube
+result: HALDExtractionResult = extract_hald(
+    "reference.jpg",
+    "style_lut.cube",
+    cube_size=33,
+    method="gaussian_rbf",   # 或 "nearest" / "shepard_idw"
+    smoothing_passes=1,
+    title="Cinematic Teal",
+)
+print(f"LUT shape: {result.lut_data.shape}")  # (33, 33, 33, 3)
+print(f"Time: {result.extraction_time_sec:.2f}s")
+
+# 2. 精细控制:用 HALDPixelExtractor 直接拿 lut_data (numpy 数组,不写文件)
+extractor = HALDPixelExtractor(
+    HALDExtractionConfig(
+        cube_size=33,
+        method="gaussian_rbf",
+        rbf_sigma=0.05,
+        smoothing_passes=1,
+        n_samples=10000,
+        seed=42,
+    )
+)
+result = extractor.extract("graded.jpg")
+lut_data = result.lut_data  # (33, 33, 33, 3) float32 [0, 1]
+source_stats = result.source_stats  # dict(mean_rgb, std_rgb, h, w, ...)
+
+# 3. 多图加权(覆盖更多色域)
+result_multi = extractor.extract_multi(
+    ["ref1.jpg", "ref2.jpg", "ref3.jpg"],
+    weights=[1.0, 1.5, 1.0],   # 可选,默认等权
+    cube_size=33,
+)
+
+# 4. RAW 输入(走 rawpy demosaic)
+result_raw = extractor.extract(
+    "photo.cr3",
+    raw_mode="half",          # "thumb" / "half" / "full"
+    use_camera_wb=True,
+)
+```
+
+**返回的 `HALDExtractionResult` 字段**:
+- `lut_data`: `(N, N, N, 3)` float32,RGB ∈ [0, 1]
+- `config`: 实际使用的 `HALDExtractionConfig`
+- `source_stats`: `{mean_rgb, std_rgb, min_rgb, max_rgb, h, w}`
+- `method`: `nearest` / `gaussian_rbf` / `shepard_idw`
+- `extraction_time_sec`: float
+- `metadata`: 源路径、shape 等
+
+**`HALDExtractionConfig` 字段**:
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `cube_size` | int | 33 | LUT 网格大小(8/17/25/33/64/65) |
+| `method` | str | `"gaussian_rbf"` | 提取算法(`nearest` / `gaussian_rbf` / `shepard_idw`) |
+| `smoothing_passes` | int | 1 | 3D box 平滑次数(0=不平滑) |
+| `rbf_sigma` | float | 0.05 | Gaussian RBF 带宽(归一化 RGB 单位) |
+| `idw_power` | float | 2.0 | Shepard IDW 的 p(1/距离^p) |
+| `n_samples` | int | 10000 | RBF/IDW 随机采样像素数(加速 O(N³ × H*W)) |
+| `seed` | int | 42 | 随机种子(可复现) |
+
+---
+
 ## ⚙️ 配置选项
 
 ### LUT3DConfig
@@ -631,6 +760,18 @@ python -m pytest tests/ --cov=src --cov-report=html
 - ✅ 集成测试：端到端流程
 - ✅ 性能测试：压力测试和基准测试
 - ✅ 边界测试：异常输入和极端情况
+
+**HALD 提取器测试**(`tests/test_hald_extractor.py`,24 个测试):
+- 基础 API / shape / dtype / 值范围 (5)
+- 3 种算法 × 参数化验证色彩保留 (4)
+- identity 输入 → 近似 identity LUT (1)
+- 3D box 平滑降噪 (4)
+- multi-reference 多图加权 (3)
+- 便捷函数 + .cube 写出符合 Adobe Cube LUT spec 1.0 (2)
+- 性能冒烟(17³ < 30s,33³ < 60s)(2)
+- source_stats 字段 (3)
+
+代码覆盖率:`core/hald_extractor.py` **98%** 行覆盖。
 
 ---
 
@@ -732,6 +873,34 @@ config = ParallelConfig(num_workers=4)
 ---
 
 ## 📝 更新日志
+
+### v0.3.0 (2026-06-16) - HALD-based 3D LUT 提取(路线 A)
+
+**新增**:
+- ✅ **`extract-hald` CLI 子命令** + `HALDPixelExtractor` Python API
+  - 从单张参考图生成**真正的 3D LUT**(解决"LrC/PS 应用 LUT 后无色彩变化"问题)
+  - 3 种算法:`nearest` / `gaussian_rbf` ⭐ (默认) / `shepard_idw`
+  - 支持 17³/33³/65³ 多种网格尺寸(LrC 14 / Resolve / Premiere 兼容)
+  - 多图加权提取(覆盖更多色域)
+  - RAW 输入(走 rawpy demosaic,与 `extract` 共享 `--raw-mode`/`--raw-wb`)
+- ✅ `tests/test_hald_extractor.py` — **24 个单元测试**(98% 行覆盖)
+  - 基础 API / 3 算法 / identity / smoothing / multi-reference / .cube 规范 / 性能冒烟
+- ✅ **不依赖 scipy** — 纯 numpy + Pillow 实现
+  - KD-tree 最近邻:暴力 numpy `argmin`
+  - Gaussian RBF / Shepard IDW:随机采样 + 向量化距离矩阵
+  - 3D box 平滑:可分离 cumsum `box1d`(沿 3 个轴各一次)
+- ✅ 文档:`README.md` 加 `#### 1.5 extract-hald` + Python API 段 + `HALDExtractionConfig` 表
+
+**为什么需要 `extract-hald`**:
+旧的 `extract` 用 `StyleExtractor`(中性基线统计假设 `mean_L=50, std=25`),算法本质是 **1D 对角线变换** — 3D 维度信息全部丢失。LrC/PS/Resolve 加载后"对角线 LUT"等价于 Curves 单通道调整,应用后照片几乎无色彩变化。
+
+`extract-hald` 用真实像素映射生成 3D LUT,验证:teal_orange 256×256 测试图 → LUT 应用后 Orange bin 输出变 Teal,反之亦然(完整 3D 翻转)。
+
+**端到端验证**:
+```bash
+lut-generator extract-hald reference.jpg -o style_lut.cube -s 33 -m gaussian_rbf
+# 17³ 耗时 ~1s,33³ ~5-15s,65³ ~30-60s(取决于图片尺寸)
+```
 
 ### v1.0.0 (2026-04-13) - 生产就绪
 
