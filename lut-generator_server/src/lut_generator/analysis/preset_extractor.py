@@ -39,6 +39,16 @@ except ImportError:  # pragma: no cover - exercised only without torch
     torch = None  # type: ignore[assignment]
     F = None  # type: ignore[assignment]
 
+# VGG perceptual loss (Phase 1.4) — 可选依赖,与 VGG 权重文件配套
+# 路径 B 已有 VGGPerceptualExtractor (core.vgg_perceptual),提供多层 feature map。
+# 损失函数:对每层 feature 做 L1 距离(Johnson 2016 标准),不用 Gram 矩阵。
+try:
+    from ..core.vgg_perceptual import VGGPerceptualExtractor
+    _HAS_VGG = True
+except Exception:  # pragma: no cover
+    _HAS_VGG = False
+    VGGPerceptualExtractor = None  # type: ignore[assignment]
+
 
 # ----------------------------------------------------------------------
 # 参数空间定义
@@ -644,7 +654,8 @@ class ExtractionResult:
 class PresetExtractor:
     """主入口: 给定一张调色图,反推 LR Basic + Tone Curve 参数。"""
 
-    def __init__(self, device: str = "cpu", verbose: bool = False):
+    def __init__(self, device: str = "cpu", verbose: bool = False,
+                 vgg_weights_path: Optional[Union[str, Path]] = None):
         if not _HAS_TORCH:
             raise RuntimeError(
                 "PyTorch is required for PresetExtractor. "
@@ -653,6 +664,29 @@ class PresetExtractor:
         self.device = device
         self.verbose = verbose
         self.renderer = LRRenderer(device=device)
+        # Phase 1.4: VGG perceptual loss,可选。优先于 Gram 损失。
+        # 默认寻找 models/vgg11-bbd30ac9.pth(项目根或 lut-generator_server 下)。
+        self.vgg_loss = None
+        if vgg_weights_path is None:
+            # 自动查找:优先 lut-generator 根,再 D:/workspace
+            for cand in [
+                Path(__file__).resolve().parents[4] / "models" / "vgg11-bbd30ac9.pth",
+                Path("D:/workspace/models/vgg11-bbd30ac9.pth"),
+            ]:
+                if cand.exists():
+                    vgg_weights_path = cand
+                    break
+        if vgg_weights_path is not None and Path(vgg_weights_path).exists() and _HAS_VGG:
+            try:
+                self.vgg_loss = VGGPerceptualExtractor(
+                    weights_path=str(vgg_weights_path), device="cpu"
+                )
+                if verbose:
+                    print(f"[PresetExtractor] VGG perceptual loss loaded: {vgg_weights_path}")
+            except Exception as e:
+                if verbose:
+                    print(f"[PresetExtractor] VGG load failed, falling back to Gram: {e}")
+                self.vgg_loss = None
 
     @staticmethod
     def load_image_as_neutral(image_path: Union[str, Path],
@@ -678,25 +712,44 @@ class PresetExtractor:
               reference: "torch.Tensor",
               params: "torch.Tensor",
               reg_weight: float = 0.001) -> "torch.Tensor":
-        """损失 = 像素 MSE + Gram 矩阵感知损失 + 参数 L2 正则。
+        """损失 = 像素 MSE + VGG 感知损失(优先) + 参数 L2 正则。
 
-        Gram 矩阵(简化版 VGG 风格):
-            - 提取 RGB 通道的"色彩风格"统计(均值 + 协方差矩阵)
-            - 不依赖预训练 VGG 模型,完全本地计算
-            - 对色相迁移、对比度、饱和度敏感
+        Phase 1.4: 把原 Gram 矩阵损失替换为 VGG-11 感知损失。
+        Gram 矩阵只算 mean + 3x3 covariance,存在"反色伪解"
+        (L-BFGS 找到的低 loss 实际是色相反向),CIEDE2000 25.12 量化确认。
+        VGG 多层 feature 编码局部纹理 + 结构,预期消除反色伪解。
 
-        权重 (Phase 1.2 默认):
+        权重 (Phase 1.4 默认):
             pixel:  1.0
-            gram:   0.5  (Phase 1.2 关键)
+            vgg:    0.5  (Phase 1.4 关键)
             reg:    0.001
+
+        Fallback: 如果 vgg_loss 未初始化(self.vgg_loss is None),
+        自动回退到 Gram 矩阵损失。
         """
         # 像素 MSE
         pix_loss = F.mse_loss(rendered, reference)
-        # Gram 风格损失: 用 8x8 patch 协方差
-        gram_loss = self._gram_style_loss(rendered, reference)
+        # VGG 感知损失(优先) / Gram 损失(回退)
+        if self.vgg_loss is not None:
+            # VGG 期望 (B, 3, H, W) in [0,1]
+            r4 = rendered.unsqueeze(0) if rendered.ndim == 3 else rendered
+            t4 = reference.unsqueeze(0) if reference.ndim == 3 else reference
+            # 如果是 HWC (B, H, W, C), permute 到 (B, C, H, W)
+            if r4.shape[-1] == 3 and r4.shape[1] != 3:
+                r4 = r4.permute(0, 3, 1, 2).contiguous()
+            if t4.shape[-1] == 3 and t4.shape[1] != 3:
+                t4 = t4.permute(0, 3, 1, 2).contiguous()
+            r_feats = self.vgg_loss(r4)
+            t_feats = self.vgg_loss(t4)
+            # Phase 1.4: 多层 feature L1 距离(Johnson 2016 标准,非 Gram)
+            perc_loss = sum(
+                F.l1_loss(r_feats[k], t_feats[k]) for k in r_feats
+            ) / len(r_feats)
+        else:
+            perc_loss = self._gram_style_loss(rendered, reference)
         # 参数 L2 正则(避免极值)
         reg_loss = (params ** 2).mean() * reg_weight
-        return pix_loss + 0.5 * gram_loss + reg_loss
+        return pix_loss + 0.5 * perc_loss + reg_loss
 
     @staticmethod
     def _gram_style_loss(rendered: "torch.Tensor",
