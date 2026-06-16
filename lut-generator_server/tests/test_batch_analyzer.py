@@ -11,7 +11,7 @@
 
 import pytest
 import numpy as np
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import tempfile
 import os
 from typing import List
@@ -32,11 +32,11 @@ class TestImageInfo:
     def test_valid_image_info(self):
         """测试有效图片信息"""
         info = ImageInfo(
-            path=Path('/test/image.jpg'),
+            path=PurePosixPath('/test/image.jpg'),
             valid=True,
             analysis_result=None
         )
-        
+
         assert info.valid is True
         assert info.error_message is None
         assert str(info.path) == '/test/image.jpg'
@@ -55,11 +55,11 @@ class TestImageInfo:
     def test_to_dict(self):
         """测试转换为字典"""
         info = ImageInfo(
-            path=Path('/test/image.jpg'),
+            path=PurePosixPath('/test/image.jpg'),
             valid=True,
             error_message=None
         )
-        
+
         result = info.to_dict()
         assert result['path'] == '/test/image.jpg'
         assert result['valid'] is True

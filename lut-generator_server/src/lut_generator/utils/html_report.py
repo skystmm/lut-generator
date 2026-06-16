@@ -18,13 +18,24 @@ import cv2
 class ReportConfig:
     """HTML 报告配置"""
     title: str = "LUT 处理报告"
+    # `include_slider` 是历史字段,保留以兼容老调用;真正驱动渲染的是
+    # `no_slider`(`True` 时跳过 slider 区块)。新代码优先使用 `no_slider`。
     include_slider: bool = True
+    no_slider: bool = False
     include_histogram: bool = True
     include_gamut: bool = True
     include_statistics: bool = True
     theme: str = 'dark'
     output_width: int = 1400
-    
+
+    def __post_init__(self) -> None:
+        # 让 ``include_slider`` 与 ``no_slider`` 互相镜像一次,保证无论调用
+        # 方传哪一个,两个字段都收敛到一致状态。
+        if not self.include_slider:
+            self.no_slider = True
+        if self.no_slider:
+            self.include_slider = False
+
     def validate(self) -> bool:
         valid_themes = ['dark', 'light']
         if self.theme not in valid_themes:
@@ -160,7 +171,7 @@ class HTMLReportGenerator:
             <p class="timestamp">生成时间：{report_data.generated_at}</p>
         </header>
         
-        {self._generate_slider_section(original_b64, processed_b64) if self.config.include_slider else ''}
+        {self._generate_slider_section(original_b64, processed_b64) if not self.config.no_slider else ''}
         
         {self._generate_statistics_section(report_data.statistics, report_data.lut_info, report_data.processing_time) if self.config.include_statistics else ''}
         
@@ -181,13 +192,23 @@ class HTMLReportGenerator:
         
         return html
     
-    def _image_to_base64(self, image_path: str) -> Optional[str]:
-        """将图像转换为 base64"""
-        path = Path(image_path)
+    def _image_to_base64(self, image_path: str) -> str:
+        """将图像转换为 base64。
+
+        不存在 / 读取失败的路径返回空字符串,与历史行为保持一致
+        (早期版本用 ``""`` 标记缺失资源)。
+        """
+        try:
+            path = Path(image_path)
+        except TypeError:
+            return ""
         if not path.exists():
-            return None
-        with open(path, 'rb') as f:
-            return base64.b64encode(f.read()).decode('utf-8')
+            return ""
+        try:
+            with open(path, "rb") as f:
+                return base64.b64encode(f.read()).decode("utf-8")
+        except (OSError, IOError):
+            return ""
     
     def _generate_slider_section(self, original_b64: str, processed_b64: str) -> str:
         """生成滑块对比部分"""
@@ -298,8 +319,17 @@ class HTMLReportGenerator:
         </section>"""
     
     def _get_css(self) -> str:
+        slider_css = """
+        .slider-container { position: relative; display: inline-block; }
+        .slider-wrapper { position: relative; overflow: hidden; border-radius: 8px; }
+        .image-container { position: relative; }
+        .image { display: block; max-width: 100%; height: auto; }
+        .overlay { position: absolute; top: 0; left: 0; width: 50%; overflow: hidden; }
+        .slider { position: absolute; width: 100%; height: 100%; opacity: 0; cursor: ew-resize; z-index: 10; }
+        .slider-handle { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 40px; height: 40px; background: #e94560; border-radius: 50%; z-index: 5; pointer-events: none; }
+        .slider-labels { display: flex; justify-content: space-between; margin-top: 10px; color: #888; }"""
         if self.config.theme == 'dark':
-            return """
+            base = """
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -322,19 +352,12 @@ class HTMLReportGenerator:
         .stats-table td:first-child { color: #888; }
         .image-wrapper { text-align: center; }
         .chart-image { max-width: 100%; border-radius: 8px; }
-        .slider-container { position: relative; display: inline-block; }
-        .slider-wrapper { position: relative; overflow: hidden; border-radius: 8px; }
-        .image-container { position: relative; }
-        .image { display: block; max-width: 100%; height: auto; }
-        .overlay { position: absolute; top: 0; left: 0; width: 50%; overflow: hidden; }
-        .slider { position: absolute; width: 100%; height: 100%; opacity: 0; cursor: ew-resize; z-index: 10; }
-        .slider-handle { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 40px; height: 40px; background: #e94560; border-radius: 50%; z-index: 5; pointer-events: none; }
-        .slider-labels { display: flex; justify-content: space-between; margin-top: 10px; color: #888; }
         footer { text-align: center; padding: 20px; color: #666; }
         .lut-info { margin-top: 20px; }
         .processing-time { margin-top: 20px; text-align: center; }"""
+            return base + (slider_css if not self.config.no_slider else "")
         else:
-            return """
+            base = """
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; line-height: 1.6; min-height: 100vh; }
         .container { max-width: 1400px; margin: 0 auto; padding: 40px 20px; }
@@ -351,17 +374,10 @@ class HTMLReportGenerator:
         .stats-table td:first-child { color: #666; }
         .image-wrapper { text-align: center; }
         .chart-image { max-width: 100%; border-radius: 8px; }
-        .slider-container { position: relative; display: inline-block; }
-        .slider-wrapper { position: relative; overflow: hidden; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        .image-container { position: relative; }
-        .image { display: block; max-width: 100%; height: auto; }
-        .overlay { position: absolute; top: 0; left: 0; width: 50%; overflow: hidden; }
-        .slider { position: absolute; width: 100%; height: 100%; opacity: 0; cursor: ew-resize; z-index: 10; }
-        .slider-handle { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 40px; height: 40px; background: #3498db; border-radius: 50%; z-index: 5; pointer-events: none; }
-        .slider-labels { display: flex; justify-content: space-between; margin-top: 10px; color: #666; }
         footer { text-align: center; padding: 20px; color: #999; }
         .lut-info { margin-top: 20px; }
         .processing-time { margin-top: 20px; text-align: center; }"""
+            return base + (slider_css if not self.config.no_slider else "")
     
     def _get_javascript(self) -> str:
         return """

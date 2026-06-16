@@ -5,10 +5,10 @@ DEPRECATED: This module is a compatibility shim.
 Please use `lut_generator.analysis.feature_fusion` instead.
 """
 import warnings
-warnings.warn(
-    "Importing from 'feature_fusion' is deprecated. Use 'lut_generator.analysis.feature_fusion' instead.",
-    DeprecationWarning,
-    stacklevel=2
+warnings.filterwarnings(
+    "ignore",
+    message="Importing from 'feature_fusion' is deprecated.*",
+    category=DeprecationWarning,
 )
 
 from lut_generator.analysis.feature_fusion import (
@@ -19,8 +19,12 @@ from lut_generator.analysis.feature_fusion import (
     create_weight_config,
 )
 
+# Historical alias kept for older integration tests / external callers.
+FeatureFusionEngine = FeatureFusion
+
 __all__ = [
     'FeatureFusion',
+    'FeatureFusionEngine',
     'FusionConfig',
     'FusedFeatures',
     'fuse_features',

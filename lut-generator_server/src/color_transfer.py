@@ -5,10 +5,10 @@ DEPRECATED: This module is a compatibility shim.
 Please use `lut_generator.core.reinhard` instead.
 """
 import warnings
-warnings.warn(
-    "Importing from 'color_transfer' is deprecated. Use 'lut_generator.core.reinhard' instead.",
-    DeprecationWarning,
-    stacklevel=2
+warnings.filterwarnings(
+    "ignore",
+    message="Importing from 'color_transfer' is deprecated.*",
+    category=DeprecationWarning,
 )
 
 from lut_generator.core.reinhard import (
@@ -21,6 +21,13 @@ from lut_generator.core.reinhard import (
 import numpy as np
 from typing import Union, Tuple
 from pathlib import Path
+
+
+# Historical alias used by integration tests and older callers.
+# ``ColorTransferMatcher`` was the original name before the cleaner
+# ``ReinhardColorTransfer`` was introduced; both refer to the same
+# statistics-based color transfer engine.
+ColorTransferMatcher = ReinhardColorTransfer
 
 
 def transfer_colors(source_path: Union[str, Path],
@@ -39,5 +46,6 @@ __all__ = [
     'TransferResult',
     'ColorStatistics',
     'LUTTransformBuilder',
+    'ColorTransferMatcher',
     'transfer_colors',
 ]
