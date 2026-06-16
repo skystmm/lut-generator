@@ -475,27 +475,41 @@ class LRRenderer:
         """params[13:37] = 8 色 × 3 维(Hue/Sat/Lum)
 
         8 色顺序 (Adobe LR): red=0°, orange=30°, yellow=60°, green=120°,
-                              aqua=180°, blue=220°, purple=280°, magenta=320°
+                              aqua=180°, blue=240°, purple=280°, magenta=320°
+
+        真实 Adobe 语义:
+            - HueAdjustmentX = ±100: 把"非 X 色"的色相**向 X 色方向** 拉
+              (±100 → ±30° 实际偏移,中心在 X 的像素不动)
+            - SaturationAdjustmentX = ±100: X 色区的饱和度放缩
+            - LuminanceAdjustmentX = ±100: X 色区的亮度调整
+
+        实现: 算每个像素到该色的色环距离,只对"非中心"像素做 hue 拉近。
         """
         hsl = self._rgb_to_hsl(img)
-        h, s, l = hsl[..., 0], hsl[..., 1], hsl[..., 2]
-        # 8 色中心(度,Adobe 默认位置)
-        color_centers = [0, 30, 60, 120, 180, 220, 280, 320]
+        h = hsl[..., 0]
+        s = hsl[..., 1]
+        l = hsl[..., 2]
+        # 8 色中心(度,Adobe 实际位置: blue=240 不是 220)
+        color_centers = [0, 30, 60, 120, 180, 240, 280, 320]
         for i, center in enumerate(color_centers):
             base_idx = 13 + i * 3
-            hue_shift = params[base_idx]      # ±100 → ±30° 实际
-            sat_amount = params[base_idx + 1]  # ±100 → ±1.0
-            lum_amount = params[base_idx + 2]  # ±100 → ±0.4
-            # 颜色区域权重
-            mask = self._hsl_color_mask(hsl, center, color_width=30.0).unsqueeze(-1)
-            # 应用 HSL 调整
-            new_h = (h + hue_shift * 0.3) % 360.0
-            new_s = (s * (1.0 + sat_amount / 100.0 * 0.8)).clamp(0, 1)
-            new_l = (l + lum_amount / 250.0).clamp(0, 1)
-            # 用 mask 混合
-            h = h * (1 - mask.squeeze(-1)) + new_h * mask.squeeze(-1)
-            s = s * (1 - mask.squeeze(-1)) + new_s * mask.squeeze(-1)
-            l = l * (1 - mask.squeeze(-1)) + new_l * mask.squeeze(-1)
+            hue_shift = params[base_idx]       # ±100 → ±30° 拉近距离
+            sat_amount = params[base_idx + 1]  # ±100 → ±0.8 倍放缩
+            lum_amount = params[base_idx + 2]  # ±100 → ±0.4 调整
+            # 该色区权重(高斯衰减,中心=1,远离→0)
+            color_mask = self._hsl_color_mask(hsl, center, color_width=40.0)
+            # 色环有符号距离
+            diff = (h - center + 180.0) % 360.0 - 180.0
+            # hue_shift > 0: 把所有色拉向 center
+            # 强度 = |diff| 越大,拉得越多;但 mask 中心区已经被 center 覆盖
+            # 简化: 拉近距离 = hue_shift * 0.3,直接叠加到 h
+            # 中心像素(diff≈0)自然不动
+            h = (h + diff.sign() * torch.minimum(diff.abs(), torch.tensor(30.0)) * (hue_shift / 100.0) * 0.3) % 360.0
+            # 饱和度: 该色区放缩
+            sat_scale = 1.0 + sat_amount / 100.0 * 0.8 * color_mask
+            s = (s * sat_scale).clamp(0, 1)
+            # 亮度: 该色区加亮/减暗
+            l = (l + lum_amount / 250.0 * color_mask).clamp(0, 1)
         return self._hsl_to_rgb(torch.stack([h, s, l], dim=-1))
 
     # ---- Color Grading 6 维 (Split Toning) ----
@@ -504,6 +518,8 @@ class LRRenderer:
         """params[37:43] = 3 区 × (Hue 0..360, Sat ±100)
 
         Shadows 暗部 / Midtones 中间 / Highlights 高光
+        色相混合算法: 把当前像素的色相 h 拉向目标色相 hue_deg(色环距离),
+        拉近距离由 sat_strength 决定。
         """
         luma = 0.299 * img[..., 0] + 0.587 * img[..., 1] + 0.114 * img[..., 2]
         # 三个区域 mask(归一化,和为 1)
@@ -516,26 +532,29 @@ class LRRenderer:
         midtone_mask = midtone_mask / total
         highlight_mask = highlight_mask / total
 
-        # 把 3 区的 (Hue, Sat) 合成"色环上的目标色"
-        # 用各区权重组合 → 最终染色 = 3 区的 RGB 颜色 × 强度
+        # 转 HSL
+        hsl = self._rgb_to_hsl(img)
+        h = hsl[..., 0]
+        s = hsl[..., 1]
+        l = hsl[..., 2]
+
         regions = [
             (params[37], params[38], shadow_mask),     # Shadows
             (params[39], params[40], midtone_mask),    # Midtones
             (params[41], params[42], highlight_mask),  # Highlights
         ]
-        # 在 HSL 空间对各区染色
-        hsl = self._rgb_to_hsl(img)
-        h, s, l = hsl[..., 0], hsl[..., 1], hsl[..., 2]
         for hue_deg, sat_strength, mask in regions:
-            # hue_deg 是 0..360,sat_strength ±100
-            # 把当前 H 向 hue_deg 拉近(强度按 mask × sat)
-            # 简化: 直接用 hue_deg 作为新色相(忽略色环距离)
-            # 更稳: 与"原 H 方向"做 mix
-            target_h = hue_deg * (sat_strength / 100.0)  # 强度小 → 接近 0
-            # hue shift = target_h * mask
-            h = h + target_h * mask
-            s = (s + (sat_strength / 200.0).clamp(-0.3, 0.5) * mask).clamp(0, 1)
-        h = h % 360.0
+            # hue_deg 是 0..360 的目标色相,sat_strength ±100 是强度
+            strength = sat_strength / 100.0  # 归一化到 [-1, 1]
+            # 色环距离: |h - hue_deg| 取短边
+            diff = (h - hue_deg + 180.0) % 360.0 - 180.0  # 有符号距离,∈ [-180, 180]
+            # strength > 0: 把 h 拉向 hue_deg(正向旋转)
+            # strength < 0: 把 h 拉离 hue_deg(反向旋转 / 去该色)
+            h = (h + diff * strength * mask) % 360.0
+            # 饱和度调整: 强度影响总体饱和度
+            # strength > 0 增饱和,strength < 0 减饱和
+            sat_shift = strength * 0.4 * mask
+            s = (s + sat_shift).clamp(0, 1)
         return self._hsl_to_rgb(torch.stack([h, s, l], dim=-1))
 
     # ---- Tone Curve 24 维(继承自 PoC 1.1) ----
@@ -883,17 +902,26 @@ class PresetExtractor:
         else:
             hist_init = None
         if initial_params is None:
-            initial_params = ParamSpace().to_vector().astype(np.float32)
-            initial_params = torch.from_numpy(initial_params)
-        current_params = initial_params.clone().to(self.device)
+            # Phase 1.3 修复: 用 hist_init 作为 current_params 起点,
+            # 让 stage 2/3 渲染时 HSL/CG 从 hist_init 估计值开始(而非 0)
+            if hist_init is not None:
+                current_params = hist_init.clone().to(self.device)
+            else:
+                initial_params = ParamSpace().to_vector().astype(np.float32)
+                current_params = torch.from_numpy(initial_params).to(self.device)
+        else:
+            current_params = initial_params.clone().to(self.device)
 
         for stage_idx, stage_dim in enumerate(stage_dims):
-            # Stage 1: 纯零起点(让 L-BFGS 自由探索 Basic+Temp)
-            # Stage 2/3: 用 histogram init 作为起点(HSL/CG 从非零启动)
+            # Stage 1: 纯零起点(让 L-BFGS 自由探索 Basic+Temp,hist_init 估计可能不准)
+            # Stage 2/3: 用 hist_init 估计值 + stage 1 最优 Basic/Temp 作为起点
             if stage_idx == 0 or hist_init is None:
                 stage_seed = current_params[:stage_dim].clone()
+                # Stage 1 起点 = Basic+Temp 全 0,让 L-BFGS 自由探索
+                if stage_idx == 0 and hist_init is not None:
+                    stage_seed[:9] = 0  # 强制 Basic+Temp 从 0 开始
             else:
-                # 把 hist_init 的前 stage_dim 维作为起点
+                # Stage 2/3 起点 = hist_init 全 67 维估计 + stage 1 最优 Basic/Temp 覆盖
                 stage_seed = hist_init[:stage_dim].clone().to(self.device)
                 # Stage 1 已优化 Basic/Temp,这里保留它
                 if stage_idx >= 1:
