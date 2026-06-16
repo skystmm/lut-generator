@@ -909,7 +909,8 @@ class PresetExtractor:
                 max_iter: int = 100,
                 n_restarts: int = 2,
                 staged: bool = True,
-                use_histogram_init: bool = True) -> ExtractionResult:
+                use_histogram_init: bool = True,
+                baseline: Optional["torch.Tensor"] = None) -> ExtractionResult:
         """L-BFGS 优化参数(支持 3 阶段 warm-start,Phase 1.2)。
 
         阶段(若 staged=True):
@@ -923,9 +924,32 @@ class PresetExtractor:
             max_iter: 单阶段 L-BFGS 内部最大迭代
             n_restarts: 多起点次数
             staged: 是否使用 3 阶段优化(Phase 1.2 默认 True)
+            use_histogram_init: 是否用 histogram warm-start(Phase 1.3 默认 True)
+            baseline: (H, W, 3) 可选,中性基线图(RAW 直出 / 调色前)。
+                **Phase 1.5 关键**:L-BFGS 优化目标是
+                `render(baseline, θ) ≈ reference`,即 baseline → reference。
+                **不传 baseline 时回退到 Phase 1.1 行为
+                `render(reference, θ) ≈ reference` — 这会陷入 trivial 解
+                (θ=0 已经是 identity),但为保持向后兼容保留。**
         """
         import time
         ref = reference.to(self.device)
+        # Phase 1.5: baseline 参数处理
+        # 不传 baseline → 自动用 0.5 灰(对一般调色图来说相当于"无色调偏移"
+        #   的虚拟中性基线,比直接用 ref 当 baseline 强多了)。
+        if baseline is None:
+            if self.verbose:
+                print(
+                    "[PresetExtractor.extract] WARNING: no baseline provided, "
+                    "using 0.5-gray as virtual neutral input. "
+                    "Pass `baseline=` for accurate reverse-engineering."
+                )
+            baseline = torch.full_like(ref, 0.5)
+        baseline = baseline.to(self.device)
+        if baseline.shape != ref.shape:
+            raise ValueError(
+                f"baseline shape {tuple(baseline.shape)} != reference shape {tuple(ref.shape)}"
+            )
         # 把 ParamSpace.dim 显式解析成 int(避免 torch.zeros 把它当 property descriptor)
         param_dim = int(ParamSpace().dim)
         if initial_params is None:
@@ -1016,7 +1040,9 @@ class PresetExtractor:
                     full_params = current_params.clone()
                     full_params = full_params.to(self.device)
                     full_params[:stage_dim] = clamped
-                    rendered = self.renderer.render(ref, full_params)
+                    # Phase 1.5: 用 baseline(中性基线)作 input,ref 作 target
+                    # 老行为(传 baseline=None)会回退到 0.5 灰
+                    rendered = self.renderer.render(baseline, full_params)
                     loss = self._loss(rendered, ref, full_params)
                     loss.backward()
                     return loss
@@ -1028,7 +1054,7 @@ class PresetExtractor:
                 with torch.no_grad():
                     full_params = current_params.clone().to(self.device)
                     full_params[:stage_dim] = theta
-                    rendered_final = self.renderer.render(ref, full_params)
+                    rendered_final = self.renderer.render(baseline, full_params)
                     final_loss = self._loss(rendered_final, ref, full_params).item()
                 if final_loss < best_loss:
                     best_loss = final_loss
