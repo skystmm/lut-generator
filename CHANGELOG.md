@@ -5,8 +5,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> 项目当前在 `main` 分支,版本号 `0.2.0`(2026-06-14,见下方)。
-> 下面 `[Unreleased]` 段记录 2 个已 commit 在 main 但**未发 tag** 的修复;测试通过后会升 `0.2.1` tag。
+> 项目当前在 `main` 分支,版本号 `0.2.1`(2026-06-17,见下方)。
+> 下面 `[Unreleased]` 段记录 Phase 1.6+/1.7 的 PresetMatcher 风格匹配(已 commit 在 main)。
 
 ---
 
@@ -42,6 +42,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Misdiagnosis Withdrawn
 - **`crs:ColorTable` 8-bit 误诊撤回**(从历史 `220f558` force-replaced): 实际 `crs:ColorTable` 是 16-bit(0-65535),LrC 14 不消费作为 3D LUT,仅作 1D tone curve。**`.xmp` preset 路线本质是 1D 表达,无法保留 3D LUT**。真正 3D 路线是 `.xmp` Creative Profile(`crs:RGBTable`)。
 - **`.lrtemplate` 推荐宣传撤回**(从 `d27b599` 注释撤回): 真实 LrC 导出的 `.lrtemplate` **没有** `LUT3D` 字段;LrC 7.3 起弃用,LrC 14 自动隐藏。**`.lrtemplate` 不能装 3D LUT**。
+
+### Phase 1: 单图反推 preset (preset_extractor + PresetMatcher)
+- **Phase 1.4 — VGG-11 感知损失替代 Gram 矩阵** (`703f0c6`): 修 `core/vgg_perceptual.py` 2 个 bug (移除 `@torch.no_grad()` 阻断梯度 + 修 state_dict key strip `features.X.weight` → `X.weight`)。VGG-11 权重下载自 PyTorch 官方源 (`models/vgg11-bbd30ac9.pth`, 507MB)
+- **Phase 1.5 — baseline 参数打破 trivial 解** (`eeadc1a`): `extract()` 新增 `baseline` 参数,无 baseline 时用 0.5 灰 fallback。L-BFGS 不能再选 theta=0 渲染 = identity 的 trivial 解,exposure -0.86 非零
+- **Phase 1.6+ — PresetMatcher 风格匹配 (C 路径)** (`00b27fa`): 不通过 L-BFGS 反推 67 维参数,而是枚举 10 个经典风格 + CIEDE2000 找最接近 ref 的 preset。**覆盖率 4× 提升** (1% → 20% < 5 像素),**速度 25× 提升** (13s → 0.5s)
+- **Phase 1.7 — 扩展 preset 库到 50** (`3b1955b`): 6 大类 (Color Films 暖/冷、B&W、Cinematic、Vintage、HDR/现代) × 50 preset。丽江图测试: best mean ΔE 18.95 (modern_pastel), < 10 像素 35.3%, 2.6s/张。**饱和效应**: 50 vs 10 只改善 5%
+- **Phase 1.9 — NN-based baseline 估计器 归档 (不执行)**: 4 候选方案全需 GPU (主机 CPU only, `torch.cuda.is_available() = False`, 训练 30-60 天不实际)。详见 `WEEK6_PRESET_MATCHER_DELIVERY.md` 第九节
+
+### Tests
+- **PresetMatcher 测试**: 10 测试 (`test_preset_matcher.py`), 全过
+- **pytest 全量**: 25 passed, 0.85s
+
+---
+
+## [0.2.1] - 2026-06-17
+
+### Added
+- **PresetMatcher 风格匹配 (Phase 1.6+ / 1.7)**: 从调色后图片反推"最接近的 Lightroom preset"
+  - `lut_generator.analysis.preset_matcher.PresetMatcher` 类
+  - 输入: `(baseline, ref)` 配对 (RAW + JPG, 或 0.5 灰 fallback + JPG)
+  - 输出: `{best_preset, mean_ΔE, coverage_lt5/lt10, all_results}`
+  - 50 个经典 preset 库 (`classic_presets.py`): Color Films 暖/冷 (20) + B&W (10) + Cinematic (6) + Vintage (7) + HDR/现代 (7)
+  - **量化 (丽江图测试)**: best mean ΔE 18.95 (modern_pastel), < 5 像素 19.7%, < 10 像素 35.3%, 2.6s/张
+  - **vs Phase 1.5 L-BFGS 反推**: 覆盖率 4× 提升, 速度 25× 提升, 可解释 (用户拿到风格名)
+- **CIEDE2000 评测脚本** `tools/ciede2000_eval.py`: 7 项统计 (mean/median/max/p95/< 2/< 5/< 10)
+- **VGG-11 感知损失** `core/vgg_perceptual.py`: Phase 1.4 修 2 bug 后, 替代 Gram 矩阵
+
+### Documentation
+- **`WEEK6_PRESET_MATCHER_DELIVERY.md`** (8.6 KB): 完整产品定位 + 算法 + 50 preset 分类 + 量化评测 + Phase 1.9 归档
+- **`PROGRESS.md`**: 重写为 Phase 1.7 状态 (替代 4 月 15 日老版本)
+
+### Commits
+- `703f0c6` Phase 1.4 - VGG-11 perceptual loss replaces Gram matrix
+- `eeadc1a` Phase 1.5 - baseline param to break trivial solution
+- `00b27fa` Phase 1.6+ - PresetMatcher (C path: reference-based style matching)
+- `3b1955b` Phase 1.7 - expand preset library to 50 (6 categories)
 
 ---
 
