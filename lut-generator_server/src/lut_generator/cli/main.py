@@ -222,7 +222,10 @@ def create_parser() -> argparse.ArgumentParser:
     extract_hald_parser.add_argument('image', type=str,
                                      help='Graded reference image path')
     extract_hald_parser.add_argument('-o', '--output', type=str, required=True,
-                                     help='Output .cube file path')
+                                     help='Output LUT file path (extension auto-completed from --format if omitted)')
+    extract_hald_parser.add_argument('-f', '--format', type=str, default='cube',
+                                     choices=['cube', '3dl', 'clf', 'xmp', 'lrtemplate', 'xmpcreative'],
+                                     help='Output format (default: cube). "xmp"/"lrtemplate" use 1D ColorTable; "xmpcreative" embeds full 3D LUT (LrC 14 Creative Profile route)')
     extract_hald_parser.add_argument('-s', '--size', type=int, default=33,
                                      choices=[8, 17, 25, 33, 64, 65],
                                      help='LUT grid size (default: 33)')
@@ -368,6 +371,7 @@ def cmd_extract_hald(args: argparse.Namespace) -> int:
     - 用真正的像素映射算法生成 3D LUT
     - 解决"LrC/PS 应用 LUT 后无色彩变化"问题(对角线 1D 压缩的根因)
     - 3 种算法:nearest / gaussian_rbf (推荐) / shepard_idw
+    - 6 种输出格式:cube / 3dl / clf / xmp / lrtemplate / xmpcreative
     """
     image_path = Path(args.image)
     output_path = Path(args.output)
@@ -376,8 +380,17 @@ def cmd_extract_hald(args: argparse.Namespace) -> int:
         print(f"Error: Image not found: {image_path}")
         return 1
 
+    # 后缀补全(在打印前 resolve,这样输出行显示真实路径)
+    ext_map = {
+        "cube": ".cube", "3dl": ".3dl", "clf": ".clf",
+        "xmp": ".xmp", "lrtemplate": ".lrtemplate", "xmpcreative": ".xmp",
+    }
+    if output_path.suffix == "":
+        output_path = output_path.with_suffix(ext_map[args.format])
+
     print(f"HALD-based 3D LUT extraction: {image_path.name}")
     print(f"  Method:    {args.method}")
+    print(f"  Format:    {args.format}  →  {output_path.name}")
     print(f"  Cube size: {args.size}³ = {args.size ** 3:,} entries")
     if args.method == "gaussian_rbf":
         print(f"  RBF sigma: {args.rbf_sigma}")
@@ -405,7 +418,7 @@ def cmd_extract_hald(args: argparse.Namespace) -> int:
             use_camera_wb=args.raw_wb,
         )
 
-        # 写 .cube(直接复用 extract_hald 便捷函数包装 LUTExporter)
+        # 复用便捷函数做导出(支持任意 format)
         extract_hald(
             image_path,
             output_path,
@@ -413,6 +426,7 @@ def cmd_extract_hald(args: argparse.Namespace) -> int:
             method=args.method,
             smoothing_passes=args.smoothing,
             title=args.title,
+            format=args.format,
         )
 
         print(f"\n✓ Extracted 3D LUT → {output_path}")

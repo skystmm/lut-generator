@@ -452,21 +452,26 @@ class HALDPixelExtractor:
 
 def extract_hald(
     reference_image_path: Union[str, Path],
-    output_cube_path: Union[str, Path],
+    output_path: Union[str, Path],
     cube_size: int = 33,
     method: str = "gaussian_rbf",
     smoothing_passes: int = 1,
     title: Optional[str] = None,
+    format: str = "cube",
 ) -> HALDExtractionResult:
-    """便捷函数:从参考图提取 3D LUT 并直接写为 .cube。
+    """便捷函数:从参考图提取 3D LUT 并导出为指定格式。
 
     Args:
         reference_image_path: 参考图路径。
-        output_cube_path: 输出 .cube 路径。
+        output_path: 输出文件路径(后缀可省略,会根据 ``format`` 自动补)。
         cube_size: cube 大小(17/25/33/64/65)。
         method: 提取算法('nearest'/'gaussian_rbf'/'shepard_idw')。
         smoothing_passes: 3D box 平滑次数。
-        title: .cube 文件 TITLE 元数据(默认用参考图文件名)。
+        title: 输出文件 TITLE / 预设名(默认用参考图文件名)。
+        format: 输出格式 — ``cube``/``3dl``/``clf``/``xmp``/``lrtemplate``/``xmpcreative``
+            (默认 ``cube``)。非 cube 格式会经 ``LUTExporter.export()`` 派发。
+            注意 ``xmp`` / ``lrtemplate`` 走的是对角线降维(1D ColorTable),
+            ``xmpcreative`` 走的是完整 3D LUT 内嵌(LrC 14 官方 Profile 路线)。
 
     Returns:
         ``HALDExtractionResult``。
@@ -482,7 +487,26 @@ def extract_hald(
     result = extractor.extract(reference_image_path)
 
     title = title or Path(reference_image_path).stem
-    LUTExporter(result.lut_data, metadata=result.metadata).export_cube(
-        output_cube_path, title=title
-    )
+
+    # 格式归一化 + 补后缀(与 CLI 命令保持一致的 ext_map)
+    fmt = format.lower()
+    ext_map = {
+        "cube": ".cube",
+        "3dl": ".3dl",
+        "clf": ".clf",
+        "xmp": ".xmp",
+        "lrtemplate": ".lrtemplate",
+        "xmpcreative": ".xmp",
+    }
+    output_path = Path(output_path)
+    if output_path.suffix == "":
+        output_path = output_path.with_suffix(ext_map[fmt])
+
+    # cube 走便捷方法(保留向后兼容),其他格式走统一 export() 派发
+    exporter = LUTExporter(result.lut_data, metadata=result.metadata)
+    if fmt == "cube":
+        exporter.export_cube(output_path, title=title)
+    else:
+        exporter.export(output_path, format=fmt, title=title)
+
     return result

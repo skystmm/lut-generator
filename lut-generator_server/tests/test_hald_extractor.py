@@ -357,6 +357,133 @@ class TestConvenienceFunction:
 
 
 # ============================================================
+# 6b. format 参数 — 6 种导出格式
+# ============================================================
+
+class TestExtractHaldFormatParam:
+    """extract_hald(format=...) 走 LUTExporter.export() 派发到非 cube 格式"""
+
+    @pytest.mark.parametrize("fmt,expected_ext", [
+        ("cube", ".cube"),
+        ("3dl", ".3dl"),
+        ("clf", ".clf"),
+        ("xmp", ".xmp"),
+        ("lrtemplate", ".lrtemplate"),
+        ("xmpcreative", ".xmp"),
+    ])
+    def test_format_dispatch_writes_file(
+        self, red_dominant_image, tmp_path, fmt, expected_ext
+    ):
+        """format 参数应触发对应格式写出(后缀自动补)"""
+        out = tmp_path / "no_suffix"  # 不带后缀,验证 ext_map 补全
+        result = extract_hald(
+            red_dominant_image,
+            out,
+            cube_size=8,
+            method="nearest",
+            smoothing_passes=0,
+            format=fmt,
+        )
+        # 实际写入路径 = no_suffix + ext_map[fmt]
+        expected = out.with_suffix(expected_ext)
+        assert expected.exists(), f"{fmt} 没写出 {expected}"
+        assert expected.stat().st_size > 0
+        assert result.lut_data.shape == (8, 8, 8, 3)
+
+    def test_format_default_is_cube(self, red_dominant_image, tmp_path):
+        """不传 format 时,默认走 cube(向后兼容)"""
+        out = tmp_path / "out"
+        extract_hald(red_dominant_image, out, cube_size=8,
+                     method="nearest", smoothing_passes=0)
+        assert (tmp_path / "out.cube").exists()
+
+    def test_format_xmp_contains_color_table(self, red_dominant_image, tmp_path):
+        """XMP 输出应含 crs:ColorTable / crs:Cluster 等 Adobe 字段"""
+        out = tmp_path / "style.xmp"
+        extract_hald(
+            red_dominant_image, out,
+            cube_size=8, method="nearest", smoothing_passes=0,
+            format="xmp", title="TestStyle",
+        )
+        content = out.read_text(encoding="utf-8")
+        assert "<?xml" in content
+        assert "crs:ColorTable" in content  # 1D 对角线降维
+        assert "TestStyle" in content
+        # ColorTable 长度: 256 entries × 3 channels
+        # (找第一个 ColorTable 段,统计空格分隔的整数 token)
+        import re
+        m = re.search(r"crs:ColorTable=\"([^\"]+)\"", content)
+        assert m, "crs:ColorTable 字段缺失"
+        tokens = m.group(1).split()
+        assert len(tokens) == 256 * 3, (
+            f"ColorTable 应有 768 个整数,实际 {len(tokens)}"
+        )
+
+    def test_format_xmpcreative_contains_rgb_table(
+        self, red_dominant_image, tmp_path
+    ):
+        """xmpcreative 输出应含 crs:RGBTable + crs:Table_<md5> Ascii85 表"""
+        import re
+        out = tmp_path / "creative.xmp"
+        extract_hald(
+            red_dominant_image, out,
+            cube_size=8, method="nearest", smoothing_passes=0,
+            format="xmpcreative", title="CreativeStyle",
+        )
+        content = out.read_text(encoding="utf-8")
+        assert "<?xml" in content
+        # 1) MD5 引用字段(取 UUID 字段或 RGBTable 字段)
+        rgb_ref = re.search(
+            r'crs:(?:UUID|RGBTable)="([A-F0-9]{32})"', content
+        )
+        assert rgb_ref, "crs:UUID / crs:RGBTable 字段缺失"
+        md5 = rgb_ref.group(1)
+
+        # 2) Ascii85 表字段 crs:Table_<md5>
+        #    内容是 XML-escaped 后的 Ascii85(<~ ... ~>),所以 < > ' 都已转义
+        #    直接用 < ~ > 字符的 escaped 形式做匹配
+        #    注:&apos; 也会出现(<~ 内部可能含 '),用 &[^;]+; 来吞掉转义
+        table_field = re.search(
+            rf'crs:Table_{md5}="(?:&[^;]+;|[^&])+&gt;"', content
+        )
+        assert table_field, (
+            f"crs:Table_{md5} Ascii85 字段缺失:\n{content[:500]}"
+        )
+
+        # 3) 解码验证:剥 XML escape → 解 Ascii85 → zlib 解压 → 大小应 = 8³ × 6 bytes
+        import html, base64, zlib
+        encoded_escaped = table_field.group(0).split('="', 1)[1].rstrip('"')
+        encoded = html.unescape(encoded_escaped)
+        raw = base64.a85decode(encoded, adobe=True)
+        decompressed = zlib.decompress(raw)
+        assert len(decompressed) == 8 ** 3 * 6, (
+            f"解压后 8³×3 channels×uint16 应=1536 字节,实际 {len(decompressed)}"
+        )
+
+        assert "CreativeStyle" in content
+
+    def test_format_lrtemplate_legacy(self, red_dominant_image, tmp_path):
+        """lrtemplate 输出是 LrC 7.3 之前的 legacy 预设格式(JSON)"""
+        import json
+        out = tmp_path / "legacy.lrtemplate"
+        extract_hald(
+            red_dominant_image, out,
+            cube_size=8, method="nearest", smoothing_passes=0,
+            format="lrtemplate", title="LegacyStyle",
+        )
+        # lrtemplate 是 JSON,顶层有 "type": "Develop"
+        data = json.loads(out.read_text(encoding="utf-8"))
+        assert data["type"] == "Develop"
+        assert "s" in data
+        assert data["s"]["Name"] == "LegacyStyle"
+        # LUT3D(LUT 3D table as string) 或 ColorTable/RGBTable(1D) 都算
+        s_keys = set(data["s"].keys())
+        assert s_keys & {"LUT3D", "ColorTable", "RGBTable"}, (
+            f".lrtemplate 应含 LUT 表,实际 keys: {sorted(s_keys)}"
+        )
+
+
+
 # 7. 性能冒烟
 # ============================================================
 
