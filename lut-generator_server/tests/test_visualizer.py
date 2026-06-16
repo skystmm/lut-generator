@@ -252,7 +252,14 @@ class TestColorVisualizer:
 
 class TestConvenienceFunction:
     """测试便捷函数"""
-    
+
+    @pytest.fixture
+    def temp_dir(self):
+        """创建临时目录(本类内本地 fixture)"""
+        temp = tempfile.mkdtemp()
+        yield temp
+        shutil.rmtree(temp)
+
     def test_visualize_color_distribution(self, temp_dir):
         """测试便捷函数"""
         from visualizer import visualize_color_distribution

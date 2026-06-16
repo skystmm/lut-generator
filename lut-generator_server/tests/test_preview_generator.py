@@ -234,7 +234,14 @@ class TestPreviewGenerator:
 
 class TestConvenienceFunction:
     """测试便捷函数"""
-    
+
+    @pytest.fixture
+    def temp_dir(self):
+        """创建临时目录(本类内本地 fixture)"""
+        temp = tempfile.mkdtemp()
+        yield temp
+        shutil.rmtree(temp)
+
     @pytest.fixture
     def sample_applier(self):
         """创建样本应用器"""
