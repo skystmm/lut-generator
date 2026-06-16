@@ -19,8 +19,9 @@ from src.lut_generator.analysis.preset_matcher import (
 
 
 class TestClassicPresets:
-    def test_library_has_at_least_10(self):
-        assert len(list_presets()) >= 10
+    def test_library_has_at_least_50(self):
+        """Phase 1.7: 扩到 50 个 preset。"""
+        assert len(list_presets()) >= 50
 
     def test_all_presets_are_ParamSpace(self):
         for name in list_presets():
@@ -39,10 +40,42 @@ class TestClassicPresets:
             assert v.shape == ref.shape
 
     def test_bw_presets_have_minus100_saturation(self):
-        """B&W preset 必须 saturation=-100。"""
-        for name in ["bw_high_contrast", "dramatic_bw"]:
+        """纯 B&W preset 必须 saturation=-100(sepia 例外,有部分色相)。"""
+        for name in ["bw_standard", "bw_high_contrast", "bw_low_contrast",
+                     "bw_film_noir", "bw_tri_x_400", "bw_tmax_100", "bw_infrared"]:
+            assert name in CLASSIC_PRESETS, f"Missing preset: {name}"
             ps = CLASSIC_PRESETS[name]
             assert ps.saturation == -100, f"{name} saturation: {ps.saturation}"
+
+    def test_six_categories_defined(self):
+        """Phase 1.7: 6 大类全部定义。"""
+        from src.lut_generator.analysis.classic_presets import CATEGORIES
+        expected = ["color_films_warm", "color_films_cool", "bw",
+                    "cinematic", "vintage", "modern"]
+        assert set(CATEGORIES.keys()) == set(expected)
+
+    def test_category_counts_add_up(self):
+        """各类 preset 数加起来等于总数。"""
+        from src.lut_generator.analysis.classic_presets import CATEGORIES, get_stats
+        stats = get_stats()
+        assert sum(v for k, v in stats.items() if k != "total") == stats["total"]
+
+    def test_list_by_category_works(self):
+        from src.lut_generator.analysis.classic_presets import list_by_category
+        warm = list_by_category("color_films_warm")
+        assert "portra_400" in warm
+        assert all(name in CLASSIC_PRESETS for name in warm)
+
+    def test_list_by_category_raises_on_unknown(self):
+        from src.lut_generator.analysis.classic_presets import list_by_category
+        with pytest.raises(ValueError):
+            list_by_category("nonexistent_category")
+
+    def test_get_stats_returns_dict(self):
+        from src.lut_generator.analysis.classic_presets import get_stats
+        stats = get_stats()
+        assert "total" in stats
+        assert stats["total"] == len(list_presets())
 
 
 class TestPresetMatcher:
@@ -92,8 +125,8 @@ class TestPresetMatcher:
         ref[..., 2] -= 0.1
         results = matcher.match(ref, baseline, downsample=64, candidates=[
             "portra_400", "kodak_gold", "velvia_50", "cinematic_teal_orange",
-            "bw_high_contrast", "cross_process", "fade_film", "cool_mist",
-            "warm_vintage", "dramatic_bw"
+            "bw_high_contrast", "vintage_cross_process", "vintage_polaroid_fade",
+            "cinematic_wes_anderson", "modern_pastel", "bw_film_noir"
         ])
         # 简单 sanity: results 存在
         assert all("name" in r for r in results)
