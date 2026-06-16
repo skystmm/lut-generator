@@ -257,8 +257,14 @@ class LUTTransformBuilder:
         self.scale = tgt_std / src_std_safe
         self.offset = tgt_mean - src_mean * self.scale
         
+        # strength=0 → 恒等变换;strength=1 → 完全迁移
+        # scale=1 + offset=0 时(无 source/target 差异时)无论 strength 都恒等
         self.scale_adjusted = 1 + (self.scale - 1) * strength
+        # 让 scale 也乘以 strength,这样 strength=0 时 scale=1 也变成 scale=0,
+        # 输出 = (lab - src_mean) * 0 + 0 = 0(不是 identity)
+        # 正确做法:strength=0 时直接短路返回 identity
         self.offset_adjusted = self.offset * strength
+        self._strength_zero = strength == 0.0
     
     def build_transform_func(self) -> Callable[[np.ndarray], np.ndarray]:
         """
@@ -268,7 +274,16 @@ class LUTTransformBuilder:
             变换函数，输入 RGB(0-1)，输出 RGB(0-1)
         """
         converter = ColorSpaceConverter()
-        
+
+        # 强度=0 短路:返回 identity
+        if self._strength_zero:
+            def identity_transform(rgb: np.ndarray) -> np.ndarray:
+                out = np.clip(rgb.astype(np.float32), 0, 1)
+                if out.ndim == 1:
+                    return out
+                return out
+            return identity_transform
+
         def transform(rgb: np.ndarray) -> np.ndarray:
             if rgb.ndim == 1:
                 rgb = rgb.reshape(1, -1)

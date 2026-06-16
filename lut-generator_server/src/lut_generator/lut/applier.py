@@ -62,13 +62,13 @@ class LUTApplier:
     def __init__(self, lut_generator: LUT3DGenerator):
         """
         初始化 LUT 应用器
-        
+
         Args:
-            lut_generator: 已生成 LUT 的生成器实例
+            lut_generator: 已生成 LUT 的生成器实例。
         """
         if lut_generator.lut_data is None:
             raise ValueError("LUT data not generated. Call generate_* on LUT3DGenerator first.")
-        
+
         self.lut_generator = lut_generator
         self.config = lut_generator.config
         self.analyzer = ColorAnalyzer()

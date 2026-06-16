@@ -10,7 +10,7 @@
 """
 
 import numpy as np
-from typing import Dict, Tuple, Optional, Union, Callable
+from typing import Dict, Tuple, Optional, Union, Callable, Any
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -114,7 +114,7 @@ class StyleFeatures:
     saturation: float      # 整体饱和度 (0 灰度 到 2 过饱和)
     
     # 原始统计
-    source_stats: ColorStatistics
+    source_stats: Optional[Any] = None  # ColorStatistics(避免 dataclass 必填)
     
     def to_dict(self) -> Dict:
         """转换为字典"""
