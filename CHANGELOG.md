@@ -49,6 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Phase 1.6+ — PresetMatcher 风格匹配 (C 路径)** (`00b27fa`): 不通过 L-BFGS 反推 67 维参数,而是枚举 10 个经典风格 + CIEDE2000 找最接近 ref 的 preset。**覆盖率 4× 提升** (1% → 20% < 5 像素),**速度 25× 提升** (13s → 0.5s)
 - **Phase 1.7 — 扩展 preset 库到 50** (`3b1955b`): 6 大类 (Color Films 暖/冷、B&W、Cinematic、Vintage、HDR/现代) × 50 preset。丽江图测试: best mean ΔE 18.95 (modern_pastel), < 10 像素 35.3%, 2.6s/张。**饱和效应**: 50 vs 10 只改善 5%
 - **Phase 1.9 — NN-based baseline 估计器 归档 (不执行)**: 4 候选方案全需 GPU (主机 CPU only, `torch.cuda.is_available() = False`, 训练 30-60 天不实际)。详见 `WEEK6_PRESET_MATCHER_DELIVERY.md` 第九节
+- **VLM 风格分类实验 (实验 1, 2026-06-17)**: 验证 "LLM 协调 + 像素算子" B 路线可行性。结论: **B 路线不实施**。VLM 选 top-3 平均 mean ΔE 20.33 vs PresetMatcher 1 个最优 18.66 (**+9% 差**),速度慢 2×,成本 $0.01-0.03/张,5 项指标全部不优。详见 `WEEK6_PRESET_MATCHER_DELIVERY.md` 第十节
+- **C+ 路线 (未来可选)**: 不改 PresetMatcher 算法,仅在用户层加 VLM 解释 best preset。1-2 天实施成本,UX 提升,离线降级容易
 
 ### Tests
 - **PresetMatcher 测试**: 10 测试 (`test_preset_matcher.py`), 全过

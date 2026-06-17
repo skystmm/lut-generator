@@ -75,13 +75,32 @@
 
 ### Phase 1.9 归档 (不执行)
 
-**原因**: 主机 CPU only,NN 训练 30-60 天,投入产出比低。
+**原因**: 主机 CPU only,NN 训练 30-60 天不实际。
 
 **触发条件**(若未来重启):
 - 用户开始抱怨"找不到合适 preset" 而非"匹配不准"
 - 愿意投入云 GPU (V100 6h = $18) + MIT-Adobe FiveK 数据集 ($50-200)
 
 **详见**: `WEEK6_PRESET_MATCHER_DELIVERY.md` 第九节 + `LUT_EXTRACTION_RESEARCH.md`
+
+### VLM 风格分类实验 (实验 1, 2026-06-17)
+
+**目的**: 验证 "LLM 协调 + 像素算子" B 路线
+
+**结论**: **B 路线不实施**
+
+| 指标 | VLM top-3 + PresetMatcher | 纯 PresetMatcher |
+|---|---|---|
+| best mean ΔE | 20.33 (VLM top-3 平均) | **18.66** (modern_pastel) |
+| 速度 | 4-6s/张 | **2.6s/张** |
+| 成本 | $0.01-0.03/张 | **$0** |
+| < 5 像素率 | 20% | 20% |
+
+**关键洞察**: 人类视觉 ≠ CIEDE2000 数学距离。VLM 看到"暖色+柔和"选 vintage_polaroid_fade,CIEDE2000 量化发现是 modern_pastel (粉彩+更低饱和)。
+
+**未来 C+ 路线 (可选)**: 不改 PresetMatcher 算法,仅在用户层加 VLM 解释 best preset。1-2 天实施。
+
+**详见**: `WEEK6_PRESET_MATCHER_DELIVERY.md` 第十节
 
 ---
 

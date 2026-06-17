@@ -220,7 +220,119 @@ torch.cuda.is_available() → False
 
 ---
 
-## 十、commit 历史 (WEEK6-7)
+## 十、VLM 风格分类实验 (实验 1, 2026-06-17)
+
+### 10.1 实验目的
+
+验证 "LLM 协调 + 像素算子" 路线(B 路线)的可行性:
+- **假设**: VLM 选 top-3 候选 → PresetMatcher 局部搜索 → 优于纯 PresetMatcher 跑全 50
+- **方法**: 用 VLM 对丽江图做 50 选 3 分类,再用 PresetMatcher 量化对比
+
+### 10.2 实验设计
+
+**输入**:
+- 丽江图(50KB 缩图): `D:\workspace\lj_small.jpg`
+- RAW baseline: `D:\workspace\DSC02288.ARW` (Sony A7M4, 65MB)
+- 50 个 preset 名称 + 描述清单 (VLM 选范围)
+
+**VLM prompt**:
+```
+分析这张照片的色调风格,并从以下 50 个 Lightroom preset 名称中选 3 个最像的(按相似度从高到低):
+[50 个 preset 名 + 描述]
+输出格式: [preset_name_1, preset_name_2, preset_name_3]
+```
+
+**VLM 选 3 个** (按 VLM 输出):
+1. `vintage_polaroid_fade` (暖色柔和低饱和拍立得复古)
+2. `portra_400` (暖色低饱和人像胶片)
+3. `vintage_70s` (暖色低饱和复古)
+
+### 10.3 量化结果 (丽江图 + RAW baseline)
+
+| 排名 | preset | mean ΔE | < 5 | < 10 | 来源 |
+|---|---|---|---|---|---|
+| 1 (PresetMatcher 全 50) | **`modern_pastel`** | **18.66** | 19.6% | **35.3%** | 纯 PresetMatcher |
+| 2 (VLM best top-3 #2) | `portra_400` | 20.02 | **20.4%** | 32.2% | VLM 选第 2 |
+| 3 (VLM best top-3 #1) | `vintage_polaroid_fade` | 20.37 | 20.2% | 31.4% | VLM 选第 1 |
+| 4 (VLM best top-3 #3) | `vintage_70s` | 20.61 | **20.5%** | 31.2% | VLM 选第 3 |
+
+### 10.4 关键发现
+
+1. **VLM 选 3 个候选 ≠ PresetMatcher 选 1 个最优**
+   - VLM top-1 (vintage_polaroid_fade) mean ΔE 20.37
+   - PresetMatcher 选 (modern_pastel) mean ΔE 18.66
+   - **VLM 差 9%**
+
+2. **VLM 选 top-3 全员都不如 PresetMatcher 选 1 个最优**
+   - VLM top-3 平均: (20.02 + 20.37 + 20.61) / 3 = **20.33**
+   - PresetMatcher 1 个: **18.66**
+   - **VLM 选的全部 3 个都被 PresetMatcher 1 个 top 击败**
+
+3. **VLM < 5 像素率 ≈ PresetMatcher (20%)**
+   - VLM 选 3 个的 < 5 像素率都是 ~20%
+   - **和 PresetMatcher 持平** → VLM 选的"看起来像"的方向是对的,但**精度差**
+
+### 10.5 决策: B 路线不实施
+
+**理由**:
+| 原因 | 量化 |
+|---|---|
+| 精度不提升 | VLM top-3 平均 20.33 vs PresetMatcher 18.66 (**+9% 差**) |
+| 速度下降 | 4-6s vs 2.6s (**慢 2×**) |
+| 成本增加 | $0.01-0.03/张 vs $0 |
+| 复杂度增加 | 需 VLM 集成 + prompt 工程 + 离线 fallback |
+| 无明显收益 | 5 项指标全部不优 |
+
+### 10.6 关键洞察: 人类视觉 ≠ CIEDE2000 数学距离
+
+- **VLM 看到**: "暖色 + 柔和" → 选 vintage_polaroid_fade / portra_400
+- **CIEDE2000 量化**: 实际是"粉彩 + 更低饱和 + 更柔和" → modern_pastel
+
+VLM 的人类视觉认知 对 **整体氛围** 敏感(暖冷、亮暗、风格大类)
+CIEDE2000 对 **色相偏移** 敏感(每个像素的颜色差值)
+
+→ 丽江图被 VLM 误判为"拍立得/Portra"是**正常偏差**,人类第一眼也会这么觉得。但 CIEDE2000 量化发现它更接近 modern_pastel(低饱和粉彩)。这个偏差 9% 是"风格大类正确,但细分风格选错"。
+
+### 10.7 实验方法学保留
+
+虽然 B 路线不实施,但**实验 1 方法学可复用**:
+
+1. **preset 描述自动生成** — 用 ParamSpace 字段推断风格方向 (已写 `_describe` 工具函数)
+2. **VLM 风格分类 prompt 模板** — 可用于未来"用户上传图 → 推荐 preset 名给人看"的 UX
+3. **B 路线 + 失败原因** — 写到文档,避免未来再走
+
+### 10.8 未来若用 LLM,推荐路径: C+ (UX 层而非算法层)
+
+**不改 PresetMatcher 算法**,仅在用户层加 LLM 解释:
+
+```
+用户上传 (baseline, ref) →
+  PresetMatcher 跑 → best = modern_pastel, mean ΔE 18.66
+  LLM 看 ref + best preset → 生成自然语言解释:
+  "你的图最像 modern_pastel 风格,因为画面整体低饱和+柔光感,
+   像粉彩画作;备选是 portra_400(更暖色胶片感)和 vintage_polaroid_fade(更复古)"
+用户看到 → 选 1 个 → 应用
+```
+
+**价值**:
+- ✅ 解释性强(用户知道为什么推荐这个 preset)
+- ✅ 不增加 PresetMatcher 算子负担(LLM 只做 UX)
+- ✅ PresetMatcher 仍是 ground truth (mean ΔE 18.66)
+- ✅ 离线降级容易(无 LLM 时只显示 preset 名,无解释)
+
+**实施成本**: 1-2 天(VLM prompt + 解释模板),不影响算法。
+
+### 10.9 VLM 实验归档
+
+**状态**: 实验 1 完成,B 路线已否决。
+**触发重启条件**:
+- 用户开始抱怨"看不懂 preset 名" 而非"匹配不准"
+- 愿意集成 VLM API (OpenAI / Claude / Gemini)
+- 接受 $0.01-0.03/张 成本 + 4-6s/张 速度
+
+---
+
+## 十一、commit 历史 (WEEK6-7)
 
 ```
 3b1955b feat(preset): Phase 1.7 - expand preset library to 50 (6 categories)
@@ -235,11 +347,12 @@ b38bee9 fix(preset): correct HSL/CG renderer formulas (色环距离) + fix extra
 
 ---
 
-## 十一、下一步建议
+## 十二、下一步建议
 
 1. **更新 README.md** — 加 PresetMatcher 章节 + 5 行示例
 2. **写 Phase 1.8** (可选) — 用户 preset 上传(.xmp 入库)
 3. **CLI `match` 子命令** (Phase 2.0) — 包装 PresetMatcher
 4. **Web UI** (Phase 3.0) — 上传 (baseline, ref) 配对 → 返回 best preset
+5. **C+ 路线** (可选) — VLM 解释 PresetMatcher 结果,提升 UX (详见 §10.8)
 
 **当前阶段(短期)完成**,无需立即推进。
